@@ -36,6 +36,15 @@ html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 15px; line-height: 1.4; padding-top: env(safe-area-inset-top, 0px); }
 [hidden] { display: none !important; }
 button, input, select { font: inherit; color: inherit; }
+/* telemóvel: sem zoom automático e sem duplo toque a ampliar */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: manipulation; }
+button, a, label, select, input, [role="button"] { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+input, select, textarea { font-size: 16px !important; }
+.keypad, .keypad button { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.keypad button:active { filter: brightness(.9); transform: scale(.97); }
+/* valor e teclado sempre visíveis no ecrã do telemóvel */
+.sheet-in > .amount { position: sticky; top: -10px; z-index: 3; background: var(--panel); margin: -10px -4px 0; padding: 12px 8px 8px; border-bottom: 1px solid var(--line); }
+.sheet-in > .keypad { position: sticky; bottom: calc(-14px - env(safe-area-inset-bottom, 0px)); z-index: 3; background: var(--panel); margin: 0 -2px; padding: 8px 2px calc(14px + env(safe-area-inset-bottom, 0px)); margin-bottom: calc(-14px - env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); }
 button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 h1, h2, h3 { font-family: var(--f-display); margin: 0; text-wrap: balance; }
@@ -170,6 +179,9 @@ button.rowi:hover { background: var(--panel-2); }
 .btn:disabled { opacity: .5; }
 .icon-btn { border: 0; background: transparent; color: var(--muted); border-radius: 8px; padding: 4px 8px; font-size: .82rem; font-weight: 600; }
 .icon-btn.confirm { color: var(--bad); }
+.icon-btn.edit { background: var(--panel-2); color: var(--fg); padding: 6px 10px; }
+.cat-top .nm, .chip-t { cursor: pointer; }
+.chip-t { padding: 2px 0; }
 .acc-edit { display: grid; grid-template-columns: minmax(0, 1fr) 6.5rem auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
 .acc-edit:first-child { border-top: 0; }
 .acc-edit input { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-width: 0; }
@@ -973,6 +985,73 @@ button.rowi:hover { background: var(--panel-2); }
   $('c-in').addEventListener('click', () => setC('receita'));
   $('add-cat').addEventListener('click', () => { const n = norm($('nova-cat').value); if (!n) return; if (!catOf(cTipo, n)) { const c = { nome: n, subs: [], icone: DEF_ICON[n.toLocaleLowerCase('pt')] || '' }; if (cTipo === 'despesa') c.orcamento = 0; cfg[cTipo].push(c); save(); } $('nova-cat').value = ''; renderCats(); });
   $('nova-cat').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('add-cat').click(); } });
+  // renomeia/move categoria e subcategoria em todos os movimentos e despesas fixas
+  function moverCat(t, de, para, sub, paraSub) {
+    const fix = (x) => {
+      if (x.tipo !== t || !same(x.categoria, de)) return;
+      if (sub == null) { x.categoria = para; return; }
+      if (same(x.subcategoria, sub)) x.subcategoria = paraSub;
+    };
+    Object.keys(S.movimentos).forEach((id) => fix(S.movimentos[id]));
+    (cfg.recorrentes || []).forEach(fix);
+  }
+  function editarCat(t, c) {
+    const usados = allMovs().filter((m) => m.tipo === t && same(m.categoria, c.nome)).length + (cfg.recorrentes || []).filter((r) => r.tipo === t && same(r.categoria, c.nome)).length;
+    const outras = cfg[t].filter((x) => x !== c);
+    const fields = [
+      { id: 'nome', label: 'Nome', value: c.nome },
+      { id: 'icone', type: 'icon', label: 'Ícone', value: iconOf(t, c.nome) }
+    ];
+    if (t === 'despesa') fields.push({ id: 'orc', type: 'money', label: 'Orçamento mensal (€)', value: c.orcamento ? vstr(c.orcamento) : '' });
+    if (usados) fields.push({ id: 'dest', type: 'select', label: 'Se apagar, os ' + usados + ' movimentos passam para', value: '', options: [['', 'Ficam como estão']].concat(outras.map((x) => [x.nome, x.nome])) });
+    dialog({
+      title: 'Editar categoria',
+      text: usados ? 'Ao mudar o nome, os ' + usados + ' movimentos desta categoria passam a ter o novo nome.' : '',
+      fields,
+      actions: [
+        { label: 'Guardar', kind: 'primary', fn: (v) => {
+          const nome = norm(v.nome); if (!nome) return 'Escreva um nome.';
+          if (t === 'despesa') { const o = parseValor(v.orc || '0'); if (isNaN(o) || o < 0) return 'Orçamento inválido.'; c.orcamento = o; }
+          if (v.icone) c.icone = v.icone;
+          if (!same(nome, c.nome) || nome !== c.nome) {
+            const outra = catOf(t, nome);
+            if (outra && outra !== c) {
+              // junta as duas categorias
+              moverCat(t, c.nome, outra.nome);
+              c.subs.forEach((sb) => { if (!outra.subs.some((x) => same(x, sb))) outra.subs.push(sb); });
+              cfg[t] = cfg[t].filter((x) => x !== c);
+              toast('Juntou "' + c.nome + '" a "' + outra.nome + '"');
+            } else { moverCat(t, c.nome, nome); c.nome = nome; toast('Categoria alterada'); }
+          } else toast('Categoria guardada');
+          save(); render();
+        } },
+        { label: 'Apagar categoria', kind: 'danger', confirm: true, fn: (v) => {
+          if (v.dest) { const d = catOf(t, v.dest); if (d) { moverCat(t, c.nome, d.nome); c.subs.forEach((sb) => { if (!d.subs.some((x) => same(x, sb))) d.subs.push(sb); }); } }
+          cfg[t] = cfg[t].filter((x) => x !== c); iconOpen = null;
+          save(); render(); toast('Categoria apagada');
+        } },
+        { label: 'Cancelar', fn: () => {} }
+      ]
+    });
+  }
+  function editarSub(t, c, s) {
+    dialog({
+      title: 'Editar subcategoria',
+      text: c.nome,
+      fields: [{ id: 'nome', label: 'Nome', value: s }],
+      actions: [
+        { label: 'Guardar', kind: 'primary', fn: (v) => {
+          const nome = norm(v.nome); if (!nome) return 'Escreva um nome.';
+          const ja = c.subs.find((x) => x !== s && same(x, nome));
+          moverCat(t, c.nome, c.nome, s, ja || nome);
+          c.subs = ja ? c.subs.filter((x) => x !== s) : c.subs.map((x) => (x === s ? nome : x));
+          save(); render(); toast('Subcategoria alterada');
+        } },
+        { label: 'Apagar', kind: 'danger', confirm: true, fn: () => { c.subs = c.subs.filter((x) => x !== s); save(); render(); toast('Subcategoria apagada'); } },
+        { label: 'Cancelar', fn: () => {} }
+      ]
+    });
+  }
   function renderCats() {
     const box = $('cats');
     const act = document.activeElement && box.contains(document.activeElement) ? document.activeElement.id : null;
@@ -980,13 +1059,13 @@ button.rowi:hover { background: var(--panel-2); }
     cfg[cTipo].forEach((c, ci) => {
       const usados = allMovs().filter((m) => m.tipo === cTipo && same(m.categoria, c.nome)).length;
       const ib = el('button', { class: 'ic', style: 'background:' + colorOf(cTipo, c.nome) + '26', text: iconOf(cTipo, c.nome), 'aria-label': 'Mudar ícone de ' + c.nome, onclick: () => { iconOpen = iconOpen === ci ? null : ci; renderCats(); } });
-      const top = el('div', { class: 'cat-top' }, [ib, el('span', { class: 'nm', text: c.nome })]);
+      const top = el('div', { class: 'cat-top' }, [ib, el('span', { class: 'nm', text: c.nome, role: 'button', tabindex: '0', onclick: () => editarCat(cTipo, c) })]);
       if (cTipo === 'despesa') { const inp = el('input', { id: 'orc-' + ci, inputmode: 'decimal', value: c.orcamento ? vstr(c.orcamento) : '', placeholder: '0', 'aria-label': 'Orçamento de ' + c.nome }); inp.addEventListener('change', () => { const v = parseValor(inp.value || '0'); if (!isNaN(v) && v >= 0) { c.orcamento = v; save(); } }); top.append(el('label', {}, [document.createTextNode('€/mês'), inp])); }
-      top.append(armed(el('button', { class: 'icon-btn', text: 'Remover' }), 'Remover', usados ? 'Confirmar (' + usados + ' mov. ficam)' : 'Confirmar', () => { cfg[cTipo] = cfg[cTipo].filter((x) => x !== c); save(); renderCats(); }));
+      top.append(el('button', { class: 'icon-btn edit', text: '✏️ Editar', 'aria-label': 'Editar ou apagar ' + c.nome, onclick: () => editarCat(cTipo, c) }));
       const card = el('div', { class: 'cat' }, [top]);
       if (iconOpen === ci) { const ic = el('div', { class: 'icons' }); ICONES.forEach((e) => ic.append(el('button', { text: e, 'aria-label': 'Usar ícone ' + e, onclick: () => { c.icone = e; iconOpen = null; save(); renderCats(); } }))); card.append(ic); }
       const chips = el('div', { class: 'chips' });
-      c.subs.forEach((s) => chips.append(el('span', { class: 'chip' }, [document.createTextNode(s), el('button', { 'aria-label': 'Remover ' + s, text: '×', onclick: () => { c.subs = c.subs.filter((x) => x !== s); save(); renderCats(); } })])));
+      c.subs.forEach((s) => chips.append(el('span', { class: 'chip' }, [el('span', { class: 'chip-t', text: s, role: 'button', tabindex: '0', onclick: () => editarSub(cTipo, c, s) }), el('button', { 'aria-label': 'Remover ' + s, text: '×', onclick: () => { c.subs = c.subs.filter((x) => x !== s); save(); renderCats(); } })])));
       const add = el('input', { id: 'sub-' + cTipo + '-' + ci, placeholder: '+ subcategoria', 'aria-label': 'Nova subcategoria em ' + c.nome });
       const addSub = () => { const n = norm(add.value); if (n && !c.subs.some((x) => same(x, n))) { c.subs.push(n); save(); renderCats(); const again = $(add.id); if (again) again.focus(); } };
       add.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addSub(); } });
