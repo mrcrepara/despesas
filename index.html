@@ -239,6 +239,11 @@ button.rowi:hover { background: var(--panel-2); }
 .field label { font-size: .78rem; font-weight: 700; color: var(--muted); }
 .field input, .field select { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px; min-width: 0; width: 100%; }
 .field .hint { font-size: .78rem; color: var(--muted); }
+.sync-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); flex: none; }
+.sync-dot.ok { background: var(--in); } .sync-dot.pend { background: var(--warn); } .sync-dot.err { background: var(--bad); }
+.sync-msg { font-size: .84rem; color: var(--bad); }
+.sync-msg:empty { display: none; }
+.sync-st { font-size: .9rem; }
 .dlg-acts { display: flex; gap: 8px; flex-wrap: wrap; }
 .dlg-acts .btn { flex: 1 1 auto; }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--tabh) + 26px + env(safe-area-inset-bottom, 0px)); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 10px; font-size: .86rem; font-weight: 600; z-index: 40; max-width: calc(100% - 32px); }
@@ -333,7 +338,11 @@ button.rowi:hover { background: var(--panel-2); }
   <!-- MAIS -->
   <section id="s-mais" class="screen" hidden>
     <div class="jump">
-      <button data-jump="m-cartoes">Cartões</button><button data-jump="m-fixas">Fixas e prestações</button><button data-jump="m-cats">Categorias</button><button data-jump="m-contas">Contas</button><button data-jump="m-backup">Cópia de segurança</button>
+      <button data-jump="m-sync">Sincronizar</button><button data-jump="m-cartoes">Cartões</button><button data-jump="m-fixas">Fixas e prestações</button><button data-jump="m-cats">Categorias</button><button data-jump="m-contas">Contas</button><button data-jump="m-backup">Cópia de segurança</button>
+    </div>
+    <div class="card" id="m-sync">
+      <div class="card-head"><h2>Sincronizar telemóvel e computador</h2><span class="sync-dot" id="sync-dot" aria-hidden="true"></span></div>
+      <div id="sync-box" style="display:flex;flex-direction:column;gap:10px"></div>
     </div>
     <div class="card" id="m-cartoes">
       <div class="card-head"><h2>Cartões de crédito</h2><button class="link" id="cartao-novo">+ Novo cartão</button></div>
@@ -360,7 +369,7 @@ button.rowi:hover { background: var(--panel-2); }
     </div>
     <div class="card" id="m-backup">
       <h2>Cópia de segurança</h2>
-      <div class="muted small">Os dados ficam só neste telemóvel. Faça uma cópia de vez em quando e guarde-a no OneDrive, no email ou no WhatsApp. Se mudar de telemóvel, use <b>Restaurar</b> com essa cópia.</div>
+      <div class="muted small">Se não usar a sincronização, os dados ficam só neste aparelho. Faça uma cópia de vez em quando e guarde-a no OneDrive, no email ou no WhatsApp. Se mudar de telemóvel, use <b>Restaurar</b> com essa cópia.</div>
       <div class="muted small" id="bk-ultima"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn primary" id="bk-json">Fazer cópia</button>
@@ -487,13 +496,15 @@ button.rowi:hover { background: var(--panel-2); }
   }
   S = shape(S);
   let cfg = S.config.categorias;
+  let syncHook = null, syncReset = null;
   function save() {
+    if (syncHook) syncHook();
     if (!storageOk) return true;
     try { localStorage.setItem(KEY, JSON.stringify(S)); return true; }
     catch (e) { toast('Sem espaço no telemóvel. Faça uma cópia e apague movimentos antigos.'); return false; }
   }
   if (storageOk && navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-  window.addEventListener('storage', (e) => { if (e.key === KEY && e.newValue) { try { S = shape(JSON.parse(e.newValue)); cfg = S.config.categorias; render(); } catch (_) {} } });
+  window.addEventListener('storage', (e) => { if (e.key === KEY && e.newValue) { try { S = shape(JSON.parse(e.newValue)); cfg = S.config.categorias; if (syncReset) syncReset(); render(); } catch (_) {} } });
   const putMov = (id, m) => { S.movimentos[id] = clone(m); };
   const delMov = (id) => { delete S.movimentos[id]; };
   const allMovs = () => Object.keys(S.movimentos).map((id) => Object.assign({ id }, S.movimentos[id]));
@@ -891,7 +902,7 @@ button.rowi:hover { background: var(--panel-2); }
   }
 
   // ================= MAIS =================
-  function renderMais() { renderCartoes(); renderFixas(); renderCats(); renderContas(); renderBackup(); }
+  function renderMais() { renderSync(); renderCartoes(); renderFixas(); renderCats(); renderContas(); renderBackup(); }
 
   $('cartao-novo').addEventListener('click', () => editarCartao(null));
   function editarCartao(c) {
@@ -1094,6 +1105,7 @@ button.rowi:hover { background: var(--panel-2); }
   // ================= diálogo genérico =================
   let dlgActs = [];
   function dialog(o) {
+    dlgOnClose = o.onClose || null;
     $('dlg-title').textContent = o.title; $('dlg-text').textContent = o.text || ''; $('dlg-msg').textContent = '';
     const f = $('dlg-form'); f.textContent = '';
     (o.fields || []).forEach((fd) => {
@@ -1116,7 +1128,8 @@ button.rowi:hover { background: var(--panel-2); }
     $('scrim').hidden = false; $('dlg').hidden = false; document.body.style.overflow = 'hidden';
     const first = f.querySelector('input,select'); if (first && (o.fields || [])[0] && o.fields[0].type !== 'select') setTimeout(() => first.focus(), 60);
   }
-  function closeDlg() { $('dlg').hidden = true; if ($('sheet').hidden) { $('scrim').hidden = true; document.body.style.overflow = ''; } }
+  let dlgOnClose = null;
+  function closeDlg() { const f = dlgOnClose; dlgOnClose = null; $('dlg').hidden = true; if (f) setTimeout(f, 0); if ($('sheet').hidden) { $('scrim').hidden = true; document.body.style.overflow = ''; } }
   $('dlg-close').addEventListener('click', closeDlg);
 
   // ================= folha de movimento =================
@@ -1314,12 +1327,257 @@ button.rowi:hover { background: var(--panel-2); }
   let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { if (screen === 's-ini') renderTrend(); }, 120); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { autoCartao(); render(); } });
 
+
+  // ================= sincronização (Firebase) =================
+  // Os dados continuam guardados no aparelho. Com sessão iniciada, as alterações
+  // são enviadas para o Firebase (mesma conta do Painel MRC) e recebidas dos outros aparelhos.
+  // Estrutura: despesas_pessoais/{uid}/dados/config  e  .../dados/mov_AAAA (um documento por ano).
+  const FB_CFG = { apiKey: 'AIzaSyALX9QWi4o89zO0wBd3A3znkP_YD-bPwwA', authDomain: 'mrc-47d1f.firebaseapp.com', projectId: 'mrc-47d1f', storageBucket: 'mrc-47d1f.firebasestorage.app', messagingSenderId: '4766445522', appId: '1:4766445522:web:ffd8567ff468e24810620b' };
+  const FB_JS = ['firebase-app-compat.js', 'firebase-auth-compat.js', 'firebase-firestore-compat.js'].map((f) => 'https://www.gstatic.com/firebasejs/10.12.0/' + f);
+  const SKEY = KEY + '.sync';
+  let SM = null; try { SM = JSON.parse(localStorage.getItem(SKEY) || 'null'); } catch (e) {}
+  SM = SM && typeof SM === 'object' ? SM : {};
+  SM.t = SM.t || {}; SM.del = SM.del || {}; SM.cfgT = SM.cfgT || 0; SM.pend = SM.pend || [];
+  const saveSM = () => { SM.pend = [...pend]; try { localStorage.setItem(SKEY, JSON.stringify(SM)); } catch (e) {} };
+  const pend = new Set(SM.pend);
+  const anoDe = (m) => (/^\d{4}/.test(String(m && m.data || '')) ? String(m.data).slice(0, 4) : 'outros');
+  let base = {}, baseAno = {}, baseCfg = '';
+  function snapBase() { base = {}; baseAno = {}; Object.keys(S.movimentos).forEach((id) => { base[id] = JSON.stringify(S.movimentos[id]); baseAno[id] = anoDe(S.movimentos[id]); }); baseCfg = JSON.stringify(S.config); }
+  snapBase();
+  const sy = { estado: 'off', user: null, db: null, unsub: null, ultima: SM.ultima || null, msg: '', timer: null, aEnviar: false, lib: false };
+
+  // regista o que mudou neste aparelho desde a última gravação
+  function marcar() {
+    const now = Date.now(); let mud = false;
+    Object.keys(S.movimentos).forEach((id) => {
+      const m = S.movimentos[id], j = JSON.stringify(m);
+      if (base[id] === j) return;
+      const a = anoDe(m);
+      SM.t[id] = now; pend.add('mov_' + a);
+      if (baseAno[id] && baseAno[id] !== a) { SM.del[id] = { ts: now, a: baseAno[id] }; pend.add('mov_' + baseAno[id]); }
+      else if (SM.del[id] && SM.del[id].a === a) delete SM.del[id];
+      base[id] = j; baseAno[id] = a; mud = true;
+    });
+    Object.keys(base).forEach((id) => {
+      if (S.movimentos[id]) return;
+      SM.del[id] = { ts: now, a: baseAno[id] }; pend.add('mov_' + baseAno[id]);
+      delete base[id]; delete baseAno[id]; delete SM.t[id]; mud = true;
+    });
+    const c = JSON.stringify(S.config);
+    if (c !== baseCfg) { SM.cfgT = now; baseCfg = c; pend.add('config'); mud = true; }
+    if (mud) { saveSM(); agendar(); }
+  }
+  syncHook = marcar;
+  syncReset = () => { snapBase(); };
+
+  // junta o que está neste aparelho com o que está na nuvem para um ano
+  function juntar(ano, rem) {
+    rem = rem || {}; const rm = rem.m || {}, rd = rem.d || {};
+    const D = {}, limite = Date.now() - 400 * 864e5;
+    Object.keys(rd).forEach((id) => { if (rd[id] > limite) D[id] = rd[id]; });
+    Object.keys(SM.del).forEach((id) => { const x = SM.del[id]; if (x.a === ano && x.ts > limite) D[id] = Math.max(D[id] || 0, x.ts); });
+    const L = {};
+    Object.keys(S.movimentos).forEach((id) => { if (anoDe(S.movimentos[id]) === ano) L[id] = S.movimentos[id]; });
+    const out = { m: {}, d: D };
+    new Set(Object.keys(L).concat(Object.keys(rm))).forEach((id) => {
+      const lt = L[id] ? (SM.t[id] || 0) : -1, rt = rm[id] ? (rm[id]._t || 0) : -1;
+      let w, t;
+      if (lt >= rt) { w = L[id]; t = lt; } else { w = Object.assign({}, rm[id]); delete w._t; t = rt; }
+      if ((D[id] || 0) >= t && t >= 0) return;
+      out.m[id] = Object.assign({}, w, { _t: t });
+    });
+    return out;
+  }
+  function igual(a, b) { const ka = Object.keys(a), kb = Object.keys(b); return ka.length === kb.length && ka.every((id) => b[id] && b[id]._t === a[id]._t); }
+  // aplica no aparelho o resultado de juntar(); devolve true se algo mudou aqui
+  function aplicarAno(ano, out) {
+    let mud = false;
+    Object.keys(out.m).forEach((id) => {
+      const m = Object.assign({}, out.m[id]); const t = m._t; delete m._t;
+      const j = JSON.stringify(m);
+      if (JSON.stringify(S.movimentos[id] || null) !== j) { S.movimentos[id] = m; mud = true; }
+      SM.t[id] = t; base[id] = j; baseAno[id] = anoDe(m);
+    });
+    Object.keys(S.movimentos).forEach((id) => {
+      if (anoDe(S.movimentos[id]) !== ano || out.m[id]) return;
+      if ((out.d[id] || 0) >= (SM.t[id] || 0)) { delete S.movimentos[id]; delete base[id]; delete baseAno[id]; delete SM.t[id]; mud = true; }
+    });
+    Object.keys(out.d).forEach((id) => { if (!SM.del[id] || SM.del[id].ts < out.d[id]) SM.del[id] = { ts: out.d[id], a: ano }; });
+    return mud;
+  }
+  function aplicarCfg(value, t) {
+    if (!(t > SM.cfgT)) return false;
+    try { S.config = JSON.parse(value); } catch (e) { return false; }
+    S = shape(S); cfg = S.config.categorias; SM.cfgT = t; baseCfg = JSON.stringify(S.config);
+    return true;
+  }
+  function gravarLocal(mud) {
+    try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
+    saveSM();
+    if (mud) render();
+  }
+  const ler = (snap) => { try { return JSON.parse(snap.data().value || 'null'); } catch (e) { return null; } };
+  const col = () => sy.db.collection('despesas_pessoais').doc(sy.user.uid).collection('dados');
+
+  // enviar alterações pendentes
+  function agendar(ms) { if (!sy.user || !sy.db) { renderSyncSt(); return; } clearTimeout(sy.timer); sy.timer = setTimeout(enviar, ms == null ? 1200 : ms); renderSyncSt(); }
+  async function enviar() {
+    if (!sy.user || !sy.db || sy.aEnviar || !pend.size) { renderSyncSt(); return; }
+    if (navigator.onLine === false) { sy.estado = 'offline'; renderSyncSt(); return; }
+    sy.aEnviar = true; sy.estado = 'enviar'; renderSyncSt();
+    let mud = false;
+    try {
+      for (const nome of [...pend]) {
+        const ref = col().doc(nome);
+        let res = null;
+        await sy.db.runTransaction(async (tx) => {
+          const snap = await tx.get(ref);
+          if (nome === 'config') {
+            const rt = snap.exists ? (snap.data().t || 0) : 0;
+            if (snap.exists && rt > SM.cfgT) { res = { cfg: snap.data().value, t: rt }; return; }
+            res = null; tx.set(ref, { value: JSON.stringify(S.config), t: SM.cfgT || Date.now() });
+          } else {
+            res = juntar(nome.slice(4), snap.exists ? ler(snap) : null);
+            tx.set(ref, { value: JSON.stringify(res), t: Date.now() });
+          }
+        });
+        if (nome === 'config') { if (res) mud = aplicarCfg(res.cfg, res.t) || mud; }
+        else mud = aplicarAno(nome.slice(4), res) || mud;
+        pend.delete(nome);
+      }
+      sy.estado = 'ok'; sy.msg = ''; sy.ultima = SM.ultima = new Date().toISOString();
+    } catch (e) { erroSync(e); }
+    sy.aEnviar = false; gravarLocal(mud); renderSyncSt();
+    if (pend.size && sy.estado === 'ok') agendar(500);
+  }
+  function erroSync(e) {
+    const c = e && e.code || '';
+    if (c === 'permission-denied') { sy.estado = 'erro'; sy.msg = 'O Firebase recusou o acesso (regras de segurança). Os dados continuam guardados neste aparelho.'; }
+    else if (c === 'unavailable' || navigator.onLine === false) { sy.estado = 'offline'; sy.msg = ''; }
+    else { sy.estado = 'erro'; sy.msg = 'Erro ao sincronizar: ' + (e && e.message || e); }
+    console.warn('sync', e);
+  }
+
+  // receber alterações dos outros aparelhos
+  function ouvir() {
+    if (sy.unsub) sy.unsub();
+    sy.unsub = col().onSnapshot((qs) => {
+      let mud = false, reenviar = false;
+      qs.docChanges().forEach((ch) => {
+        if (ch.type === 'removed' || ch.doc.metadata.hasPendingWrites) return;
+        const nome = ch.doc.id, d = ch.doc.data();
+        if (nome === 'config') { mud = aplicarCfg(d.value, d.t || 0) || mud; if ((d.t || 0) < SM.cfgT) { pend.add('config'); reenviar = true; } return; }
+        if (nome.indexOf('mov_') !== 0) return;
+        const rem = ler(ch.doc) || {}; const out = juntar(nome.slice(4), rem);
+        mud = aplicarAno(nome.slice(4), out) || mud;
+        if (!igual(out.m, rem.m || {})) { pend.add(nome); reenviar = true; }
+      });
+      if (sy.estado !== 'erro') { sy.estado = pend.size ? 'enviar' : 'ok'; if (!pend.size) sy.ultima = SM.ultima = new Date().toISOString(); }
+      gravarLocal(mud); renderSyncSt();
+      if (reenviar || pend.size) agendar(300);
+    }, (e) => { erroSync(e); renderSyncSt(); });
+  }
+
+  // primeira ligação neste aparelho: juntar ou usar só a nuvem
+  async function primeiraVez() {
+    const qs = await col().get();
+    const temNuvem = qs.docs.some((d) => d.id.indexOf('mov_') === 0 && Object.keys((ler(d) || {}).m || {}).length);
+    const nLocal = Object.keys(S.movimentos).length;
+    const marcarTudo = () => { Object.keys(S.movimentos).forEach((id) => { if (!SM.t[id]) SM.t[id] = 1; pend.add('mov_' + anoDe(S.movimentos[id])); }); pend.add('config'); };
+    if (!temNuvem || !nLocal) { marcarTudo(); if (temNuvem && !SM.cfgT) SM.cfgT = 0; return; }
+    let escolheu = false;
+    await new Promise((resolve) => dialog({
+      onClose: () => resolve(),
+      title: 'Já há dados na nuvem',
+      text: 'Este aparelho tem ' + nLocal + ' movimentos e a nuvem também já tem dados (por exemplo, do telemóvel). O que quer fazer?',
+      actions: [
+        { label: 'Juntar os dois', kind: 'primary', fn: () => { escolheu = true; marcarTudo(); } },
+        { label: 'Usar só os da nuvem', kind: 'danger', confirm: true, fn: () => { escolheu = true; S.movimentos = {}; SM.t = {}; SM.del = {}; SM.cfgT = 0; pend.clear(); snapBase(); gravarLocal(true); } }
+      ]
+    }));
+    if (!escolheu) marcarTudo();
+  }
+
+  // biblioteca e sessão
+  function carregarJS(src) { return new Promise((ok, ko) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = ko; document.head.appendChild(s); }); }
+  async function iniciarFirebase() {
+    try { for (const f of FB_JS) await carregarJS(f); } catch (e) { sy.lib = false; sy.estado = 'semlib'; renderSync(); return; }
+    sy.lib = true;
+    if (!firebase.apps.length) firebase.initializeApp(FB_CFG);
+    sy.db = firebase.firestore();
+    firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
+    firebase.auth().onAuthStateChanged(async (user) => {
+      if (user && user.isAnonymous) user = null;
+      sy.user = user || null;
+      if (!user) { if (sy.unsub) sy.unsub(); sy.unsub = null; sy.estado = 'off'; renderSync(); return; }
+      sy.estado = 'enviar'; renderSync();
+      try {
+        if (SM.uid !== user.uid) { SM.uid = user.uid; await primeiraVez(); saveSM(); }
+        ouvir(); agendar(0);
+      } catch (e) { erroSync(e); renderSync(); }
+    });
+  }
+  window.addEventListener('online', () => { if (sy.user) { sy.estado = 'enviar'; agendar(0); } });
+  window.addEventListener('offline', () => { if (sy.user) { sy.estado = 'offline'; renderSyncSt(); } });
+
+  // ecrã
+  function renderSyncSt() {
+    const dot = $('sync-dot'); if (!dot) return;
+    const k = sy.estado === 'ok' && !pend.size ? 'ok' : sy.estado === 'erro' ? 'err' : sy.user ? 'pend' : '';
+    dot.className = 'sync-dot' + (k ? ' ' + k : '');
+    const st = $('sync-st'); if (!st) return;
+    const hora = sy.ultima ? new Date(sy.ultima).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+    st.textContent = sy.estado === 'erro' ? '⚠️ Não sincronizado' : sy.estado === 'offline' ? '📴 Sem internet. As alterações ficam guardadas e são enviadas quando voltar a ligação.' : pend.size || sy.estado === 'enviar' ? '🔄 A sincronizar…' : '✓ Sincronizado' + (hora ? ' (' + hora + ')' : '');
+    const m = $('sync-msg'); if (m) m.textContent = sy.msg || '';
+  }
+  function renderSync() {
+    const box = $('sync-box'); if (!box) return;
+    box.textContent = '';
+    if (sy.estado === 'semlib' && !sy.user) {
+      box.append(el('div', { class: 'muted small', text: 'Sem ligação à internet. Os dados ficam neste aparelho. Volte a abrir a app com internet para iniciar a sincronização.' }));
+      renderSyncSt(); return;
+    }
+    if (!sy.user) {
+      box.append(el('div', { class: 'muted small', text: 'Entre com o mesmo email e palavra-passe do Painel MRC. Depois, o que registar no telemóvel aparece no computador e vice-versa, e fica uma cópia guardada na internet.' }));
+      const em = el('input', { id: 'sy-email', type: 'email', autocomplete: 'username', placeholder: 'email' });
+      const pw = el('input', { id: 'sy-pass', type: 'password', autocomplete: 'current-password', placeholder: 'palavra-passe' });
+      const msg = el('div', { class: 'sync-msg', id: 'sync-msg', role: 'status' });
+      const entrar = el('button', { class: 'btn primary', type: 'submit', text: 'Entrar e sincronizar' });
+      const f = el('form', { style: 'display:flex;flex-direction:column;gap:8px' }, [el('div', { class: 'field' }, [el('label', { for: 'sy-email', text: 'Email' }), em]), el('div', { class: 'field' }, [el('label', { for: 'sy-pass', text: 'Palavra-passe' }), pw]), msg, el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, [entrar, el('button', { class: 'link', type: 'button', text: 'Esqueci-me da palavra-passe', onclick: async () => { const e = norm(em.value); if (!e) { msg.textContent = 'Escreva primeiro o email.'; return; } try { await firebase.auth().sendPasswordResetEmail(e); msg.style.color = 'var(--muted)'; msg.textContent = 'Enviámos um email para mudar a palavra-passe.'; } catch (x) { msg.textContent = erroLogin(x); } } })])]);
+      f.addEventListener('submit', async (ev) => {
+        ev.preventDefault(); msg.style.color = ''; msg.textContent = '';
+        if (!sy.lib) { msg.textContent = 'Sem ligação à internet.'; return; }
+        entrar.disabled = true; entrar.textContent = 'A entrar…';
+        try { await firebase.auth().signInWithEmailAndPassword(norm(em.value), pw.value); toast('Sessão iniciada. A sincronizar…'); }
+        catch (x) { msg.textContent = erroLogin(x); entrar.disabled = false; entrar.textContent = 'Entrar e sincronizar'; }
+      });
+      box.append(f); renderSyncSt(); return;
+    }
+    box.append(el('div', { class: 'sync-st', id: 'sync-st' }));
+    box.append(el('div', { class: 'muted small', text: 'Conta: ' + (sy.user.email || '') + '. As alterações são enviadas sozinhas, mesmo que a internet falhe por uns tempos.' }));
+    box.append(el('div', { class: 'sync-msg', id: 'sync-msg', role: 'status' }));
+    box.append(el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, [
+      el('button', { class: 'btn', text: 'Sincronizar agora', onclick: () => { Object.keys(S.movimentos).forEach((id) => pend.add('mov_' + anoDe(S.movimentos[id]))); pend.add('config'); saveSM(); sy.estado = 'enviar'; agendar(0); } }),
+      armed(el('button', { class: 'btn danger', text: 'Terminar sessão' }), 'Terminar sessão', 'Confirmar?', () => { firebase.auth().signOut(); toast('Sessão terminada. Os dados ficam neste aparelho.'); })
+    ]));
+    renderSyncSt();
+  }
+  function erroLogin(x) {
+    const c = x && x.code || '';
+    if (c === 'auth/invalid-credential' || c === 'auth/wrong-password' || c === 'auth/user-not-found' || c === 'auth/invalid-login-credentials') return 'Email ou palavra-passe errados.';
+    if (c === 'auth/invalid-email') return 'O email não está bem escrito.';
+    if (c === 'auth/too-many-requests') return 'Demasiadas tentativas. Espere uns minutos.';
+    if (c === 'auth/network-request-failed') return 'Sem ligação à internet.';
+    return 'Não foi possível entrar (' + (c || x) + ').';
+  }
+
   // ================= arranque =================
   if (!storageOk) $('banner-off').hidden = false;
   autoCartao();
   go('s-ini');
+  iniciarFirebase();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  window.__app = { S: () => S, aPagar, faturas, saldoConta };
+  window.__app = { S: () => S, aPagar, faturas, saldoConta, sync: () => ({ sy, SM, pend: [...pend] }) };
 })();
 </script>
 </body>
