@@ -354,7 +354,7 @@ button.rowi:hover { background: var(--panel-2); }
     </div>
     <div class="card" id="m-fixas">
       <h2>Despesas e receitas fixas</h2>
-      <div class="muted small">Repetem-se todos os meses e aparecem em "A pagar" até as confirmar. Para criar uma, use o + e escolha "Repetir: Fixa".</div>
+      <div class="muted small">Repetem-se todos os meses, de 3 em 3 meses, de 6 em 6 meses ou uma vez por ano, e aparecem em "A pagar" até as confirmar. Para criar uma, use o + e escolha "Repetir: Fixa".</div>
       <div id="fixas"></div>
       <h2 style="margin-top:6px">Compras em prestações</h2>
       <div id="parcelas"></div>
@@ -422,7 +422,8 @@ button.rowi:hover { background: var(--panel-2); }
       <div class="toggle" id="w-pago"><span id="pago-lbl">Já está pago</span><button class="switch" id="sw-pago" role="switch" aria-checked="true" aria-labelledby="pago-lbl"></button></div>
       <div id="w-rep"><div class="lbl">Repetir</div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <div class="seg" role="group" aria-label="Repetir"><button id="r-no" aria-pressed="true">Não</button><button id="r-fixa" aria-pressed="false">Fixa mensal</button><button id="r-parc" aria-pressed="false">Prestações</button></div>
+          <div class="seg" role="group" aria-label="Repetir"><button id="r-no" aria-pressed="true">Não</button><button id="r-fixa" aria-pressed="false">Fixa</button><button id="r-parc" aria-pressed="false">Prestações</button></div>
+          <div class="seg" role="group" aria-label="De quanto em quanto tempo" id="w-cada" hidden><button data-cada="1" aria-pressed="true">Mensal</button><button data-cada="3" aria-pressed="false">Trimestral</button><button data-cada="6" aria-pressed="false">Semestral</button><button data-cada="12" aria-pressed="false">Anual</button></div>
           <div class="stepper" id="w-n" hidden><button id="n-menos" aria-label="Menos prestações">−</button><b id="n-val">3</b><button id="n-mais" aria-label="Mais prestações">+</button></div>
         </div>
       </div>
@@ -551,7 +552,11 @@ button.rowi:hover { background: var(--panel-2); }
   function limiteUsado(card) { let u = 0; allMovs().forEach((m) => { if (m.skip) return; if (isCard(m) && same(m.cartao, card.nome)) u += Number(m.valor); if (m.tipo === 'pagamento' && same(m.cartao, card.nome)) u -= Number(m.valor); }); return r2(Math.max(0, u)); }
 
   // movimentos virtuais das fixas
-  function recAtiva(r, ym) { return r.inicio <= ym && (!r.fim || ym <= r.fim); }
+  const difMeses = (a, b) => { const [ya, ma] = a.split('-').map(Number), [yb, mb] = b.split('-').map(Number); return (yb - ya) * 12 + (mb - ma); };
+  const CADA_TXT = { 1: 'Mensal', 3: 'Trimestral', 6: 'Semestral', 12: 'Anual' };
+  const cadaDe = (r) => (CADA_TXT[Number(r && r.cada)] ? Number(r.cada) : 1);
+  const repeteTxt = (cada, dia) => (cada === 1 ? 'Repete todos os meses ao dia ' : cada === 12 ? 'Repete uma vez por ano, ao dia ' : 'Repete de ' + cada + ' em ' + cada + ' meses, ao dia ') + dia;
+  function recAtiva(r, ym) { return r.inicio <= ym && (!r.fim || ym <= r.fim) && difMeses(r.inicio, ym) % cadaDe(r) === 0; }
   function virtuais(ym) {
     const out = [];
     const reais = allMovs();
@@ -972,12 +977,13 @@ button.rowi:hover { background: var(--panel-2); }
     });
   }
 
+  function proxFixa(r) { let ym = ymOf(hoje()); const ms = allMovs(); for (let i = 0; i < 13; i++, ym = addMes(ym, 1)) if (recAtiva(r, ym) && !ms.some((m) => m.recorrenteId === r.id && m.recMes === ym)) return mesCurto.format(mesDate(ym)) + ' ' + ym.slice(0, 4); return '—'; }
   function renderFixas() {
     const box = $('fixas'); box.textContent = '';
     if (!cfg.recorrentes.length) box.append(el('div', { class: 'muted small', text: 'Ainda sem despesas fixas (ex.: renda, internet, ginásio).' }));
     cfg.recorrentes.forEach((r) => {
       const ativa = !r.fim || r.fim >= ymOf(hoje());
-      box.append(el('button', { class: 'rowi' + (ativa ? '' : ' pend'), onclick: () => editarFixa(r) }, [icBox(r.tipo, r.categoria), el('div', { style: 'min-width:0' }, [el('div', { class: 't1', text: r.descricao || r.subcategoria || r.categoria }), el('div', { class: 't2', text: 'Dia ' + r.dia + ' · ' + (r.cartao ? '💳 ' + r.cartao : r.conta || 'sem conta') + (r.fim ? (ativa ? ' · até ' : ' · terminou em ') + mesCurto.format(mesDate(r.fim)) + ' ' + r.fim.slice(0, 4) : '') })]), el('span', { class: 'v ' + (r.tipo === 'receita' ? 'in' : 'out'), text: (r.tipo === 'receita' ? '+' : '−') + eur.format(r.valor) })]));
+      box.append(el('button', { class: 'rowi' + (ativa ? '' : ' pend'), onclick: () => editarFixa(r) }, [icBox(r.tipo, r.categoria), el('div', { style: 'min-width:0' }, [el('div', { class: 't1', text: r.descricao || r.subcategoria || r.categoria }), el('div', { class: 't2', text: CADA_TXT[cadaDe(r)] + ' · dia ' + r.dia + (cadaDe(r) > 1 ? ' · próxima ' + proxFixa(r) : '') + ' · ' + (r.cartao ? '💳 ' + r.cartao : r.conta || 'sem conta') + (r.fim ? (ativa ? ' · até ' : ' · terminou em ') + mesCurto.format(mesDate(r.fim)) + ' ' + r.fim.slice(0, 4) : '') })]), el('span', { class: 'v ' + (r.tipo === 'receita' ? 'in' : 'out'), text: (r.tipo === 'receita' ? '+' : '−') + eur.format(r.valor) })]));
     });
     const pb = $('parcelas'); pb.textContent = '';
     const grupos = new Map();
@@ -998,8 +1004,8 @@ button.rowi:hover { background: var(--panel-2); }
     const pagarCom = [['', 'Nenhuma']].concat(cfg.contas.map((c) => ['c:' + c.nome, c.nome])).concat(r.tipo === 'despesa' ? cfg.cartoes.map((c) => ['k:' + c.nome, '💳 ' + c.nome]) : []);
     dialog({
       title: 'Fixa: ' + (r.descricao || r.categoria), text: 'As alterações valem para os meses que ainda não foram confirmados.',
-      fields: [{ id: 'descricao', label: 'Descrição', type: 'text', value: r.descricao || '' }, { id: 'valor', label: 'Valor (€)', type: 'money', value: vstr(r.valor) }, { id: 'dia', label: 'Dia do mês', type: 'number', value: r.dia }, { id: 'categoria', label: 'Categoria', type: 'select', value: r.categoria, options: cats.some((c) => same(c[0], r.categoria)) ? cats : [[r.categoria, r.categoria]].concat(cats) }, { id: 'pagar', label: r.tipo === 'receita' ? 'Conta' : 'Pagar com', type: 'select', value: r.cartao ? 'k:' + r.cartao : r.conta ? 'c:' + r.conta : '', options: pagarCom }, { id: 'fim', label: 'Último mês (opcional)', type: 'month', value: r.fim || '' }],
-      actions: [{ label: 'Guardar', kind: 'primary', fn: (v) => { const valor = parseValor(v.valor); if (!(valor > 0)) return 'Indique o valor.'; const dia = Math.round(Number(v.dia)); if (!(dia >= 1 && dia <= 31)) return 'O dia tem de estar entre 1 e 31.'; Object.assign(r, { descricao: norm(v.descricao), valor, dia, categoria: v.categoria, conta: v.pagar.startsWith('c:') ? v.pagar.slice(2) : '', cartao: v.pagar.startsWith('k:') ? v.pagar.slice(2) : '', fim: v.fim || '' }); if (r.categoria !== (catOf(r.tipo, r.categoria) || {}).nome) r.subcategoria = ''; save(); autoCartao(); render(); toast('Fixa atualizada'); } },
+      fields: [{ id: 'descricao', label: 'Descrição', type: 'text', value: r.descricao || '' }, { id: 'valor', label: 'Valor (€)', type: 'money', value: vstr(r.valor) }, { id: 'dia', label: 'Dia do mês', type: 'number', value: r.dia }, { id: 'cada', label: 'Repete', type: 'select', value: String(cadaDe(r)), options: [['1', 'Mensal (todos os meses)'], ['3', 'Trimestral (de 3 em 3 meses)'], ['6', 'Semestral (de 6 em 6 meses)'], ['12', 'Anual (uma vez por ano)']], hint: 'Conta a partir de ' + mesCurto.format(mesDate(r.inicio)) + ' ' + r.inicio.slice(0, 4) + ', o primeiro mês desta fixa.' }, { id: 'categoria', label: 'Categoria', type: 'select', value: r.categoria, options: cats.some((c) => same(c[0], r.categoria)) ? cats : [[r.categoria, r.categoria]].concat(cats) }, { id: 'pagar', label: r.tipo === 'receita' ? 'Conta' : 'Pagar com', type: 'select', value: r.cartao ? 'k:' + r.cartao : r.conta ? 'c:' + r.conta : '', options: pagarCom }, { id: 'fim', label: 'Último mês (opcional)', type: 'month', value: r.fim || '' }],
+      actions: [{ label: 'Guardar', kind: 'primary', fn: (v) => { const valor = parseValor(v.valor); if (!(valor > 0)) return 'Indique o valor.'; const dia = Math.round(Number(v.dia)); if (!(dia >= 1 && dia <= 31)) return 'O dia tem de estar entre 1 e 31.'; Object.assign(r, { descricao: norm(v.descricao), valor, dia, categoria: v.categoria, conta: v.pagar.startsWith('c:') ? v.pagar.slice(2) : '', cartao: v.pagar.startsWith('k:') ? v.pagar.slice(2) : '', fim: v.fim || '', cada: Number(v.cada) || 1 }); if (r.categoria !== (catOf(r.tipo, r.categoria) || {}).nome) r.subcategoria = ''; save(); autoCartao(); render(); toast('Fixa atualizada'); } },
         { label: 'Terminar', confirm: true, fn: () => { r.fim = addMes(ymOf(hoje()), -1) < r.inicio ? r.inicio : ymOf(hoje()); save(); render(); toast('Esta fixa termina este mês'); } },
         { label: 'Apagar', kind: 'danger', confirm: true, fn: () => { cfg.recorrentes = cfg.recorrentes.filter((x) => x !== r); Object.keys(S.movimentos).forEach((id) => { const m = S.movimentos[id]; if (m.recorrenteId === r.id && (m.skip || !m.pago)) delete S.movimentos[id]; else if (m.recorrenteId === r.id) delete m.recorrenteId; }); save(); render(); toast('Fixa apagada. Os pagamentos já feitos ficam no histórico.'); } }]
     });
@@ -1180,8 +1186,8 @@ button.rowi:hover { background: var(--panel-2); }
 
   // ================= folha de movimento =================
   function openSheet(m) {
-    if (m) ent = { id: m.id, tipo: m.tipo, valor: vstr(m.valor), cat: m.categoria || '', sub: m.subcategoria || '', conta: m.conta || '', cartao: m.cartao || '', destino: m.destino || '', data: m.data, desc: m.descricao || '', criado: m.criado, pago: m.pago !== false, rep: 'no', n: 3, orig: m };
-    else ent = { id: null, tipo: ent && !ent.id && ent.tipo !== 'transferencia' ? ent.tipo : 'despesa', valor: '', cat: '', sub: '', conta: ultimaConta(), cartao: '', destino: '', data: ymOf(hoje()) === mes ? hoje() : mes + '-01', desc: '', pago: true, rep: 'no', n: 3 };
+    if (m) ent = { id: m.id, tipo: m.tipo, valor: vstr(m.valor), cat: m.categoria || '', sub: m.subcategoria || '', conta: m.conta || '', cartao: m.cartao || '', destino: m.destino || '', data: m.data, desc: m.descricao || '', criado: m.criado, pago: m.pago !== false, rep: 'no', n: 3, cada: 1, orig: m };
+    else ent = { id: null, tipo: ent && !ent.id && ent.tipo !== 'transferencia' ? ent.tipo : 'despesa', valor: '', cat: '', sub: '', conta: ultimaConta(), cartao: '', destino: '', data: ymOf(hoje()) === mes ? hoje() : mes + '-01', desc: '', pago: true, rep: 'no', n: 3, cada: 1 };
     $('sheet-title').textContent = m ? 'Editar movimento' : 'Novo movimento';
     $('del-mov').style.visibility = m ? 'visible' : 'hidden'; $('del-mov').textContent = 'Apagar'; delArmed = false;
     $('m-data').value = ent.data; $('m-desc').value = ent.desc; $('sheet-msg').textContent = '';
@@ -1210,6 +1216,7 @@ button.rowi:hover { background: var(--panel-2); }
   $('r-no').addEventListener('click', () => { ent.rep = 'no'; drawSheet(); });
   $('r-fixa').addEventListener('click', () => { ent.rep = 'fixa'; drawSheet(); });
   $('r-parc').addEventListener('click', () => { ent.rep = 'parc'; drawSheet(); });
+  $('w-cada').addEventListener('click', (e) => { const b = e.target.closest('button[data-cada]'); if (!b) return; ent.cada = Number(b.dataset.cada); drawSheet(); });
   $('n-menos').addEventListener('click', () => { ent.n = Math.max(2, ent.n - 1); drawSheet(); });
   $('n-mais').addEventListener('click', () => { ent.n = Math.min(60, ent.n + 1); drawSheet(); });
   $('keypad').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) key(b.dataset.k); });
@@ -1227,7 +1234,7 @@ button.rowi:hover { background: var(--panel-2); }
   function drawAmount() {
     const a = $('amt'); a.textContent = ent.valor || '0'; a.className = ent.tipo === 'receita' ? 'in' : ent.tipo === 'transferencia' ? 'tr' : 'out';
     const v = parseValor(ent.valor || '0');
-    $('amt-note').textContent = ent.rep === 'parc' && v > 0 ? ent.n + ' prestações de ' + eur.format(r2(v / ent.n)) + ' (valor total)' : ent.rep === 'fixa' ? 'Repete todos os meses ao dia ' + Number(String(ent.data).slice(8, 10)) : '';
+    $('amt-note').textContent = ent.rep === 'parc' && v > 0 ? ent.n + ' prestações de ' + eur.format(r2(v / ent.n)) + ' (valor total)' : ent.rep === 'fixa' ? repeteTxt(ent.cada || 1, Number(String(ent.data).slice(8, 10))) : '';
   }
   function drawSheet() {
     const t = ent.tipo, tr = t === 'transferencia', edit = !!ent.id;
@@ -1267,6 +1274,7 @@ button.rowi:hover { background: var(--panel-2); }
     $('r-no').setAttribute('aria-pressed', ent.rep === 'no'); $('r-fixa').setAttribute('aria-pressed', ent.rep === 'fixa'); $('r-parc').setAttribute('aria-pressed', ent.rep === 'parc');
     $('r-parc').hidden = t !== 'despesa'; if (t !== 'despesa' && ent.rep === 'parc') ent.rep = 'no';
     $('w-n').hidden = ent.rep !== 'parc'; $('n-val').textContent = ent.n;
+    $('w-cada').hidden = ent.rep !== 'fixa'; $('w-cada').querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', Number(b.dataset.cada) === (ent.cada || 1)));
     $('ok').textContent = edit ? 'Guardar' : tr ? 'Transferir' : t === 'despesa' ? 'Guardar despesa' : 'Guardar receita';
     drawAmount();
   }
@@ -1300,15 +1308,15 @@ button.rowi:hover { background: var(--panel-2); }
         putMov(uid(), Object.assign({}, base, { valor: v, data: d, descricao: (base.descricao || base.subcategoria || base.categoria) + ' (' + (i + 1) + '/' + n + ')', pago: ent.cartao ? true : (i === 0 ? pago : false), parcela: { g, i: i + 1, n }, criado: agora }));
       }
     } else if (ent.rep === 'fixa') {
-      const r = Object.assign({ id: uid(), valor, dia: Number(ent.data.slice(8, 10)), inicio: ymOf(ent.data), fim: '' }, base);
+      const r = Object.assign({ id: uid(), valor, dia: Number(ent.data.slice(8, 10)), inicio: ymOf(ent.data), fim: '', cada: ent.cada || 1 }, base);
       cfg.recorrentes.push(r);
       putMov(uid(), Object.assign({}, base, { valor, data: ent.data, pago, recorrenteId: r.id, recMes: r.inicio, criado: agora }));
       autoCartao();
     } else putMov(uid(), Object.assign({}, base, { valor, data: ent.data, pago, criado: agora }));
     if (!save()) return;
-    const novo = !ent.id, rep = ent.rep, nn = ent.n;
+    const novo = !ent.id, rep = ent.rep, nn = ent.n, cd = ent.cada || 1;
     closeSheet(); mes = ymOf(ent.data); render();
-    toast(!novo ? 'Alteração guardada' : rep === 'parc' ? nn + ' prestações criadas' : rep === 'fixa' ? 'Fixa criada: repete todos os meses' : (t === 'despesa' ? 'Despesa' : 'Receita') + ' guardada: ' + eur.format(valor));
+    toast(!novo ? 'Alteração guardada' : rep === 'parc' ? nn + ' prestações criadas' : rep === 'fixa' ? 'Fixa criada: ' + CADA_TXT[cd].toLowerCase() : (t === 'despesa' ? 'Despesa' : 'Receita') + ' guardada: ' + eur.format(valor));
   }
   let delArmed = false;
   function apagarMov() {
@@ -1623,7 +1631,7 @@ button.rowi:hover { background: var(--panel-2); }
   go('s-ini');
   iniciarFirebase();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  window.__app = { S: () => S, aPagar, faturas, saldoConta, sync: () => ({ sy, SM, pend: [...pend] }) };
+  window.__app = { S: () => S, virtuais, aPagar, faturas, saldoConta, sync: () => ({ sy, SM, pend: [...pend] }) };
 })();
 </script>
 </body>
