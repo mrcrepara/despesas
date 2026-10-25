@@ -167,6 +167,10 @@ button.rowi:hover { background: var(--panel-2); }
 .cat-top input { width: 5.5rem; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; text-align: right; }
 .icons { display: flex; flex-wrap: wrap; gap: 4px; }
 .icons button { width: 36px; height: 36px; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; font-size: 1.05rem; }
+.icons button.sel { border-color: var(--accent); background: var(--accent-soft); }
+.icon-pick { display: flex; flex-direction: column; gap: 8px; }
+.icon-list { max-height: 230px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 2px; }
+.icon-grp { font-size: .72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-top: 4px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .chip { display: inline-flex; align-items: center; gap: 2px; background: var(--panel-2); border-radius: 999px; padding: 3px 4px 3px 10px; font-size: .82rem; }
 .chip button { border: 0; background: transparent; color: var(--muted); width: 22px; height: 22px; border-radius: 50%; }
@@ -479,7 +483,18 @@ button.rowi:hover { background: var(--panel-2); }
   const vstr = (v) => String(r2(v)).replace('.', ',');
 
   const HUES = ['#e0703a', '#2f9e7a', '#3f7fd9', '#c9488a', '#d8a32a', '#7a5fd1', '#3aa6b8', '#c4573b', '#6b9a3a', '#8a6f5c', '#d06c9a', '#4b6ad1'];
-  const ICONES = ['🏠','🛒','🍽️','☕','🚗','⛽','💡','📱','💊','👕','🎬','⚽','✈️','🎁','🐾','📚','🧒','🔧','💼','⚡','📹','💶','🏦','↩️','🛍️','💇','🏥','🎮','🧾','📦','🏖️','🚲','🎓','💍','🛠️','🏡'];
+  const ICONES_GRUPOS = [
+    ['Casa', ['🏠','🏡','🏢','🛋️','🛏️','🚿','🧹','🧺','🔑','🪴','🧯','🪟']],
+    ['Comida', ['🛒','🍽️','☕','🍕','🍔','🥖','🍎','🥩','🐟','🍷','🍺','🧃','🍰']],
+    ['Transporte', ['🚗','🚙','⛽','🅿️','🛣️','🚌','🚆','🚕','🛵','🏍️','🚲','🛞']],
+    ['Contas e serviços', ['💡','💧','🔥','📱','📶','💻','📺','📡','🧾','📮','🛡️','📄']],
+    ['Saúde e pessoal', ['💊','🏥','🦷','👓','🩺','💪','🧴','👕','👟','👜','💇','💄','⌚','💍']],
+    ['Lazer', ['🎬','🎮','🎵','🎸','⚽','🏋️','🎣','🏖️','✈️','🏨','🎡','📖','🎉','🎂','🎁']],
+    ['Família', ['🧒','👶','🎒','📚','🎓','🐾','🐶','🐱','🧸','⛪']],
+    ['Trabalho', ['💼','⚡','🔌','🔧','🛠️','🔩','🪛','🧰','🪜','📹','🚪','🏗️','📦','🧑‍🔧','🚐']],
+    ['Dinheiro', ['💶','💰','🏦','💳','📈','🐷','💸','↩️','🧮','🛍️','🎯','⭐','❤️','🎗️']]
+  ];
+  const ICONES = ICONES_GRUPOS.reduce((a, g) => a.concat(g[1]), []);
   const DEF_ICON = { 'casa': '🏠', 'alimentação': '🛒', 'automático': '🚗', 'serviços': '📱', 'saúde': '💊', 'bens pessoais': '👕', 'lazer': '🎬', 'viagens': '✈️', 'outros': '📦', 'trabalho': '💼', 'outras receitas': '💶' };
 
   // ================= armazenamento =================
@@ -1063,6 +1078,37 @@ button.rowi:hover { background: var(--panel-2); }
       ]
     });
   }
+  // escolha de ícone: lista por grupos + os seus ícones + qualquer emoji do teclado
+  const primeiroSimbolo = (txt) => { txt = String(txt || '').trim(); if (!txt) return ''; try { if (window.Intl && Intl.Segmenter) { const it = new Intl.Segmenter('pt', { granularity: 'grapheme' }).segment(txt)[Symbol.iterator]().next(); return it.value ? it.value.segment : ''; } } catch (e) {} return Array.from(txt).slice(0, 2).join(''); };
+  function iconPicker(atual, onPick) {
+    const box = el('div', { class: 'icon-pick' });
+    box.dataset.value = atual || '';
+    const marcar = () => box.querySelectorAll('.icons button').forEach((b) => { const on = b.textContent === box.dataset.value; b.setAttribute('aria-pressed', on); b.classList.toggle('sel', on); });
+    const escolher = (e) => { box.dataset.value = e; marcar(); if (onPick) onPick(e); };
+    const grelha = (lista) => { const g = el('div', { class: 'icons' }); lista.forEach((e) => g.append(el('button', { type: 'button', text: e, 'aria-label': 'Usar ícone ' + e, onclick: () => escolher(e) }))); return g; };
+    const lista = el('div', { class: 'icon-list' });
+    const montar = () => {
+      lista.textContent = '';
+      const extra = (cfg.iconesExtra || []).filter((e) => e && ICONES.indexOf(e) < 0);
+      if (extra.length) lista.append(el('div', { class: 'icon-grp', text: 'Os seus ícones' }), grelha(extra));
+      ICONES_GRUPOS.forEach(([nome, l]) => lista.append(el('div', { class: 'icon-grp', text: nome }), grelha(l)));
+      marcar();
+    };
+    montar();
+    box.append(lista);
+    const inp = el('input', { type: 'text', placeholder: 'Outro: escreva ou cole um emoji', 'aria-label': 'Outro ícone', autocomplete: 'off' });
+    const msg = el('div', { class: 'sync-msg' });
+    const usar = () => {
+      const e = primeiroSimbolo(inp.value);
+      if (!e) { msg.textContent = 'Escreva um emoji (no teclado do telemóvel, toque no 😀).'; return; }
+      cfg.iconesExtra = (cfg.iconesExtra || []).filter((x) => x !== e); cfg.iconesExtra.unshift(e); cfg.iconesExtra = cfg.iconesExtra.slice(0, 40);
+      save(); inp.value = ''; msg.textContent = ''; box.dataset.value = e; montar(); lista.scrollTop = 0; escolher(e);
+    };
+    inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); usar(); } });
+    box.append(el('div', { class: 'row-add' }, [inp, el('button', { class: 'btn', type: 'button', text: 'Usar', onclick: usar })]), msg);
+    marcar();
+    return box;
+  }
   function renderCats() {
     const box = $('cats');
     const act = document.activeElement && box.contains(document.activeElement) ? document.activeElement.id : null;
@@ -1074,7 +1120,7 @@ button.rowi:hover { background: var(--panel-2); }
       if (cTipo === 'despesa') { const inp = el('input', { id: 'orc-' + ci, inputmode: 'decimal', value: c.orcamento ? vstr(c.orcamento) : '', placeholder: '0', 'aria-label': 'Orçamento de ' + c.nome }); inp.addEventListener('change', () => { const v = parseValor(inp.value || '0'); if (!isNaN(v) && v >= 0) { c.orcamento = v; save(); } }); top.append(el('label', {}, [document.createTextNode('€/mês'), inp])); }
       top.append(el('button', { class: 'icon-btn edit', text: '✏️ Editar', 'aria-label': 'Editar ou apagar ' + c.nome, onclick: () => editarCat(cTipo, c) }));
       const card = el('div', { class: 'cat' }, [top]);
-      if (iconOpen === ci) { const ic = el('div', { class: 'icons' }); ICONES.forEach((e) => ic.append(el('button', { text: e, 'aria-label': 'Usar ícone ' + e, onclick: () => { c.icone = e; iconOpen = null; save(); renderCats(); } }))); card.append(ic); }
+      if (iconOpen === ci) card.append(iconPicker(iconOf(cTipo, c.nome), (e) => { c.icone = e; iconOpen = null; save(); renderCats(); }));
       const chips = el('div', { class: 'chips' });
       c.subs.forEach((s) => chips.append(el('span', { class: 'chip' }, [el('span', { class: 'chip-t', text: s, role: 'button', tabindex: '0', onclick: () => editarSub(cTipo, c, s) }), el('button', { 'aria-label': 'Remover ' + s, text: '×', onclick: () => { c.subs = c.subs.filter((x) => x !== s); save(); renderCats(); } })])));
       const add = el('input', { id: 'sub-' + cTipo + '-' + ci, placeholder: '+ subcategoria', 'aria-label': 'Nova subcategoria em ' + c.nome });
@@ -1112,7 +1158,7 @@ button.rowi:hover { background: var(--panel-2); }
       const id = 'dlg-' + fd.id;
       let inp;
       if (fd.type === 'select') { inp = el('select', { id }); fd.options.forEach(([v, l]) => inp.append(el('option', { value: v, text: l }))); inp.value = fd.value || ''; }
-      else if (fd.type === 'icon') { inp = el('div', { class: 'icons', id }); inp.dataset.value = fd.value; ICONES.forEach((e) => { const b = el('button', { type: 'button', text: e, 'aria-pressed': e === fd.value, style: e === fd.value ? 'border-color:var(--accent);background:var(--accent-soft)' : '' }); b.addEventListener('click', () => { inp.dataset.value = e; inp.querySelectorAll('button').forEach((x) => { x.style.borderColor = ''; x.style.background = ''; }); b.style.borderColor = 'var(--accent)'; b.style.background = 'var(--accent-soft)'; }); inp.append(b); }); }
+      else if (fd.type === 'icon') { inp = iconPicker(fd.value, null); inp.id = id; }
       else inp = el('input', { id, type: fd.type === 'money' ? 'text' : fd.type, inputmode: fd.type === 'money' ? 'decimal' : fd.type === 'number' ? 'numeric' : null, value: fd.value == null ? '' : String(fd.value), placeholder: fd.placeholder || (fd.type === 'money' ? '0,00' : null), min: fd.type === 'number' ? 1 : null, max: fd.type === 'number' ? 31 : null });
       f.append(el('div', { class: 'field' }, [el('label', { for: id, text: fd.label }), inp, fd.hint ? el('div', { class: 'hint', text: fd.hint }) : null]));
     });
