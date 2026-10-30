@@ -838,6 +838,8 @@ button.rowi:hover { background: var(--panel-2); }
     const groups = new Map();
     ms.forEach((m) => { const k = m.categoria || 'Sem categoria'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(m); });
     const rows = [...groups.entries()].map(([nome, list]) => ({ nome, v: soma(list), list })).sort((a, b) => b.v - a.v);
+    // uma cor diferente para cada categoria do gráfico (igual na fatia, no ícone e na barra)
+    const corDe = new Map(rows.map((row, i) => [row.nome, HUES[i % HUES.length]]));
     const box = $('donut'); box.querySelectorAll('svg').forEach((e) => e.remove());
     const NS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(NS, 'svg'); svg.setAttribute('viewBox', '0 0 200 200'); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'Distribuição por categoria');
@@ -849,7 +851,7 @@ button.rowi:hover { background: var(--panel-2); }
       const a1 = a + row.v / total * Math.PI * 2, sel = gAberta === row.nome;
       const path = document.createElementNS(NS, 'path');
       path.setAttribute('d', rows.length === 1 ? arcPath(0, Math.PI * 2 - 0.0001, sel ? R + 4 : R, r) : arcPath(a + gap / 2, a1 - gap / 2, sel ? R + 5 : R, r));
-      path.setAttribute('fill', colorOf(gTipo, row.nome)); path.setAttribute('opacity', gAberta && !sel ? .35 : 1); path.style.cursor = 'pointer';
+      path.setAttribute('fill', corDe.get(row.nome)); path.setAttribute('opacity', gAberta && !sel ? .35 : 1); path.style.cursor = 'pointer';
       path.addEventListener('click', () => { gAberta = gAberta === row.nome ? null : row.nome; renderDonut(); });
       svg.append(path); a = a1;
     });
@@ -860,12 +862,12 @@ button.rowi:hover { background: var(--panel-2); }
     const lg = $('legend'); lg.textContent = '';
     if (!rows.length) { lg.append(el('div', { class: 'empty', text: gTipo === 'despesa' ? 'Sem despesas neste mês.' : 'Sem receitas neste mês.' })); return; }
     rows.forEach((row) => {
-      const col = colorOf(gTipo, row.nome), open = gAberta === row.nome;
-      lg.append(el('button', { class: 'lg', 'aria-pressed': open, onclick: () => { gAberta = open ? null : row.nome; renderDonut(); } }, [icBox(gTipo, row.nome), el('span', { class: 'n', text: row.nome }), el('span', { class: 'a', text: eur.format(row.v) }), el('span', { class: 'p', text: pct.format(row.v / total) }), el('span', { class: 'bar' }, [el('i', { style: 'width:' + (row.v / rows[0].v * 100) + '%;background:' + col })])]));
+      const col = corDe.get(row.nome), open = gAberta === row.nome;
+      lg.append(el('button', { class: 'lg', 'aria-pressed': open, onclick: () => { gAberta = open ? null : row.nome; renderDonut(); } }, [el('span', { class: 'ic', style: 'background:' + col + '26', text: iconOf(gTipo, row.nome), 'aria-hidden': 'true' }), el('span', { class: 'n', text: row.nome }), el('span', { class: 'a', text: eur.format(row.v) }), el('span', { class: 'p', text: pct.format(row.v / total) }), el('span', { class: 'bar' }, [el('i', { style: 'width:' + (row.v / total * 100) + '%;background:' + col })])]));
       if (open) {
         const sg = new Map(); row.list.forEach((m) => { const k = m.subcategoria || 'Sem subcategoria'; sg.set(k, r2((sg.get(k) || 0) + Number(m.valor))); });
         const max = Math.max(...sg.values()); const subs = el('div', { class: 'subs' });
-        [...sg.entries()].sort((x, y) => y[1] - x[1]).forEach(([n, v]) => subs.append(el('div', { class: 'srow' }, [el('span', { text: n }), el('span', { class: 'num', text: eur.format(v) + ' · ' + pct.format(v / row.v) }), el('div', { class: 'track' }, [el('i', { style: 'width:' + (v / max * 100) + '%;background:' + col })])])));
+        [...sg.entries()].sort((x, y) => y[1] - x[1]).forEach(([n, v]) => subs.append(el('div', { class: 'srow' }, [el('span', { text: n }), el('span', { class: 'num', text: eur.format(v) + ' · ' + pct.format(v / row.v) }), el('div', { class: 'track' }, [el('i', { style: 'width:' + (v / row.v * 100) + '%;background:' + col })])])));
         lg.append(subs);
       }
     });
