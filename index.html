@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Gestor de Despesas</title>
-<meta name="theme-color" content="#0e7c66">
+<meta name="theme-color" content="#0f1411">
+<script>(function(){var t="escuro";try{t=localStorage.getItem("gestorDespesas.tema")||"escuro"}catch(e){}document.documentElement.setAttribute("data-tema",t);var esc=t==="escuro"||(t==="auto"&&window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches);document.querySelector('meta[name="theme-color"]').setAttribute("content",esc?"#0f1411":"#0e7c66");})();</script>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -25,7 +26,12 @@
   --f-body: "Figtree", "Segoe UI", system-ui, -apple-system, sans-serif;
   --r: 14px; --tabh: 64px;
 }
-@media (prefers-color-scheme: dark) { :root {
+:root[data-tema="escuro"] {
+  --bg: #0f1411; --panel: #18201b; --panel-2: #222b26; --fg: #e8ede9; --muted: #9ba8a1; --line: #2c3731;
+  --accent: #3cc5a5; --accent-fg: #05211a; --accent-soft: #163a30;
+  --in: #3cc5a5; --out: #f08a55; --bad: #ff6b6b; --warn: #e8b04a; --track: #28322d; --focus: #7aa7ff;
+  --scrim: rgba(0, 0, 0, .6); --shadow: 0 6px 24px rgba(0, 0, 0, .5); color-scheme: dark; }
+@media (prefers-color-scheme: dark) { :root[data-tema="auto"] {
   --bg: #0f1411; --panel: #18201b; --panel-2: #222b26; --fg: #e8ede9; --muted: #9ba8a1; --line: #2c3731;
   --accent: #3cc5a5; --accent-fg: #05211a; --accent-soft: #163a30;
   --in: #3cc5a5; --out: #f08a55; --bad: #ff6b6b; --warn: #e8b04a; --track: #28322d; --focus: #7aa7ff;
@@ -397,7 +403,7 @@ button.rowi:hover { background: var(--panel-2); }
   <!-- MAIS -->
   <section id="s-mais" class="screen" hidden>
     <div class="jump">
-      <button data-jump="m-sync">Sincronizar</button><button data-jump="m-cartoes">Cartões</button><button data-jump="m-fixas">Fixas e prestações</button><button data-jump="m-cats">Categorias</button><button data-jump="m-contas">Contas</button><button data-jump="m-backup">Cópia de segurança</button>
+      <button data-jump="m-sync">Sincronizar</button><button data-jump="m-cartoes">Cartões</button><button data-jump="m-fixas">Fixas e prestações</button><button data-jump="m-cats">Categorias</button><button data-jump="m-contas">Contas</button><button data-jump="m-tema">Aparência</button><button data-jump="m-backup">Cópia de segurança</button>
     </div>
     <div class="card" id="m-sync">
       <div class="card-head"><h2>Sincronizar telemóvel e computador</h2><span class="sync-dot" id="sync-dot" aria-hidden="true"></span></div>
@@ -425,6 +431,10 @@ button.rowi:hover { background: var(--panel-2); }
       <div class="muted small">O saldo inicial é o que a conta tinha antes do primeiro movimento registado.</div>
       <div id="contas"></div>
       <div class="row-add"><input id="nova-conta" placeholder="Nova conta (ex.: Poupança)"><button class="btn" id="add-conta">Adicionar</button></div>
+    </div>
+    <div class="card" id="m-tema">
+      <h2>Aparência</h2>
+      <div class="seg full" role="group" aria-label="Tema"><button data-tema="escuro">Escuro</button><button data-tema="claro">Claro</button><button data-tema="auto">Como o telemóvel</button></div>
     </div>
     <div class="card" id="m-backup">
       <h2>Cópia de segurança</h2>
@@ -481,6 +491,7 @@ button.rowi:hover { background: var(--panel-2); }
           <div class="seg" role="group" aria-label="De quanto em quanto tempo" id="w-cada" hidden><button data-cada="1" aria-pressed="true">Mensal</button><button data-cada="3" aria-pressed="false">Trimestral</button><button data-cada="6" aria-pressed="false">Semestral</button><button data-cada="12" aria-pressed="false">Anual</button></div>
           <div class="stepper" id="w-n" hidden><button id="n-menos" aria-label="Menos prestações">−</button><b id="n-val">3</b><button id="n-mais" aria-label="Mais prestações">+</button></div>
         </div>
+        <div class="toggle" id="w-auto" hidden style="margin-top:8px"><span id="auto-lbl">Débito automático (fica paga sozinha no dia)</span><button class="switch" id="sw-auto" role="switch" aria-checked="false" aria-labelledby="auto-lbl"></button></div>
       </div>
     </div>
     <div class="sheet-msg" id="sheet-msg" role="status"></div>
@@ -622,17 +633,24 @@ button.rowi:hover { background: var(--panel-2); }
     });
     return out;
   }
-  // fixas pagas com cartão entram sozinhas na fatura quando chega o dia
+  // fixas pagas com cartão, ou com débito automático numa conta, ficam registadas sozinhas quando chega o dia
   function autoCartao() {
     let mudou = false;
     const h = hoje(), hm = ymOf(h);
     cfg.recorrentes.forEach((r) => {
-      if (!r.cartao) return;
+      const auto = !r.cartao && r.auto && r.conta;
+      if (!r.cartao && !auto) return;
       for (let ym = r.inicio; ym <= hm; ym = addMes(ym, 1)) {
         if (!recAtiva(r, ym)) continue;
         const d = dataEm(ym, r.dia); if (d > h) continue;
-        if (allMovs().some((m) => m.recorrenteId === r.id && m.recMes === ym)) continue;
-        putMov(uid(), { data: d, tipo: r.tipo, categoria: r.categoria, subcategoria: r.subcategoria || '', conta: '', cartao: r.cartao, descricao: r.descricao || '', valor: Number(r.valor), pago: true, recorrenteId: r.id, recMes: ym, criado: new Date().toISOString() });
+        const ja = allMovs().filter((m) => m.recorrenteId === r.id && m.recMes === ym);
+        if (ja.length) {
+          // com débito automático, uma ocorrência que ficou por confirmar passa a paga no dia
+          if (auto) ja.forEach((m) => { if (!m.skip && !m.pago && m.data <= h) { const b = Object.assign({}, S.movimentos[m.id], { pago: true }); putMov(m.id, b); mudou = true; } });
+          continue;
+        }
+        // id fixo por fixa e por mês, para o telemóvel e o PC não criarem o mesmo pagamento duas vezes
+        putMov('auto_' + r.id + '_' + ym, { data: d, tipo: r.tipo, categoria: r.categoria, subcategoria: r.subcategoria || '', conta: auto ? r.conta : '', cartao: auto ? '' : r.cartao, descricao: r.descricao || '', valor: Number(r.valor), pago: true, recorrenteId: r.id, recMes: ym, automatico: true, criado: new Date().toISOString() });
         mudou = true;
       }
     });
@@ -1101,7 +1119,7 @@ button.rowi:hover { background: var(--panel-2); }
     if (!cfg.recorrentes.length) box.append(el('div', { class: 'muted small', text: 'Ainda sem despesas fixas (ex.: renda, internet, ginásio).' }));
     cfg.recorrentes.forEach((r) => {
       const ativa = !r.fim || r.fim >= ymOf(hoje());
-      box.append(el('button', { class: 'rowi' + (ativa ? '' : ' pend'), onclick: () => editarFixa(r) }, [icBox(r.tipo, r.categoria), el('div', { style: 'min-width:0' }, [el('div', { class: 't1', text: r.descricao || r.subcategoria || r.categoria }), el('div', { class: 't2', text: CADA_TXT[cadaDe(r)] + ' · dia ' + r.dia + (cadaDe(r) > 1 ? ' · próxima ' + proxFixa(r) : '') + ' · ' + (r.cartao ? '💳 ' + r.cartao : r.conta || 'sem conta') + (r.fim ? (ativa ? ' · até ' : ' · terminou em ') + mesCurto.format(mesDate(r.fim)) + ' ' + r.fim.slice(0, 4) : '') })]), el('span', { class: 'v ' + (r.tipo === 'receita' ? 'in' : 'out'), text: (r.tipo === 'receita' ? '+' : '−') + eur.format(r.valor) })]));
+      box.append(el('button', { class: 'rowi' + (ativa ? '' : ' pend'), onclick: () => editarFixa(r) }, [icBox(r.tipo, r.categoria), el('div', { style: 'min-width:0' }, [el('div', { class: 't1', text: r.descricao || r.subcategoria || r.categoria }), el('div', { class: 't2', text: CADA_TXT[cadaDe(r)] + ' · dia ' + r.dia + (cadaDe(r) > 1 ? ' · próxima ' + proxFixa(r) : '') + ' · ' + (r.cartao ? '💳 ' + r.cartao + ' · automática' : (r.conta || 'sem conta') + (r.auto && r.conta ? ' · automática' : '')) + (r.fim ? (ativa ? ' · até ' : ' · terminou em ') + mesCurto.format(mesDate(r.fim)) + ' ' + r.fim.slice(0, 4) : '') })]), el('span', { class: 'v ' + (r.tipo === 'receita' ? 'in' : 'out'), text: (r.tipo === 'receita' ? '+' : '−') + eur.format(r.valor) })]));
     });
     const pb = $('parcelas'); pb.textContent = '';
     const grupos = new Map();
@@ -1122,8 +1140,8 @@ button.rowi:hover { background: var(--panel-2); }
     const pagarCom = [['', 'Nenhuma']].concat(cfg.contas.map((c) => ['c:' + c.nome, c.nome])).concat(r.tipo === 'despesa' ? cfg.cartoes.map((c) => ['k:' + c.nome, '💳 ' + c.nome]) : []);
     dialog({
       title: 'Fixa: ' + (r.descricao || r.categoria), text: 'As alterações valem para os meses que ainda não foram confirmados.',
-      fields: [{ id: 'descricao', label: 'Descrição', type: 'text', value: r.descricao || '' }, { id: 'valor', label: 'Valor (€)', type: 'money', value: vstr(r.valor) }, { id: 'dia', label: 'Dia do mês', type: 'number', value: r.dia }, { id: 'cada', label: 'Repete', type: 'select', value: String(cadaDe(r)), options: [['1', 'Mensal (todos os meses)'], ['3', 'Trimestral (de 3 em 3 meses)'], ['6', 'Semestral (de 6 em 6 meses)'], ['12', 'Anual (uma vez por ano)']], hint: 'Conta a partir de ' + mesCurto.format(mesDate(r.inicio)) + ' ' + r.inicio.slice(0, 4) + ', o primeiro mês desta fixa.' }, { id: 'categoria', label: 'Categoria', type: 'select', value: r.categoria, options: cats.some((c) => same(c[0], r.categoria)) ? cats : [[r.categoria, r.categoria]].concat(cats) }, { id: 'pagar', label: r.tipo === 'receita' ? 'Conta' : 'Pagar com', type: 'select', value: r.cartao ? 'k:' + r.cartao : r.conta ? 'c:' + r.conta : '', options: pagarCom }, { id: 'fim', label: 'Último mês (opcional)', type: 'month', value: r.fim || '' }],
-      actions: [{ label: 'Guardar', kind: 'primary', fn: (v) => { const valor = parseValor(v.valor); if (!(valor > 0)) return 'Indique o valor.'; const dia = Math.round(Number(v.dia)); if (!(dia >= 1 && dia <= 31)) return 'O dia tem de estar entre 1 e 31.'; Object.assign(r, { descricao: norm(v.descricao), valor, dia, categoria: v.categoria, conta: v.pagar.startsWith('c:') ? v.pagar.slice(2) : '', cartao: v.pagar.startsWith('k:') ? v.pagar.slice(2) : '', fim: v.fim || '', cada: Number(v.cada) || 1 }); if (r.categoria !== (catOf(r.tipo, r.categoria) || {}).nome) r.subcategoria = ''; save(); autoCartao(); render(); toast('Fixa atualizada'); } },
+      fields: [{ id: 'descricao', label: 'Descrição', type: 'text', value: r.descricao || '' }, { id: 'valor', label: 'Valor (€)', type: 'money', value: vstr(r.valor) }, { id: 'dia', label: 'Dia do mês', type: 'number', value: r.dia }, { id: 'cada', label: 'Repete', type: 'select', value: String(cadaDe(r)), options: [['1', 'Mensal (todos os meses)'], ['3', 'Trimestral (de 3 em 3 meses)'], ['6', 'Semestral (de 6 em 6 meses)'], ['12', 'Anual (uma vez por ano)']], hint: 'Conta a partir de ' + mesCurto.format(mesDate(r.inicio)) + ' ' + r.inicio.slice(0, 4) + ', o primeiro mês desta fixa.' }, { id: 'categoria', label: 'Categoria', type: 'select', value: r.categoria, options: cats.some((c) => same(c[0], r.categoria)) ? cats : [[r.categoria, r.categoria]].concat(cats) }, { id: 'pagar', label: r.tipo === 'receita' ? 'Conta' : 'Pagar com', type: 'select', value: r.cartao ? 'k:' + r.cartao : r.conta ? 'c:' + r.conta : '', options: pagarCom }, { id: 'auto', label: r.tipo === 'receita' ? 'Recebimento automático' : 'Débito automático', type: 'select', value: r.auto ? 'sim' : 'nao', options: [['nao', 'Não: confirmo em "A pagar"'], ['sim', 'Sim: fica registada sozinha no dia']], hint: 'Só funciona com uma conta escolhida. Com cartão de crédito já é sempre automático.' }, { id: 'fim', label: 'Último mês (opcional)', type: 'month', value: r.fim || '' }],
+      actions: [{ label: 'Guardar', kind: 'primary', fn: (v) => { const valor = parseValor(v.valor); if (!(valor > 0)) return 'Indique o valor.'; const dia = Math.round(Number(v.dia)); if (!(dia >= 1 && dia <= 31)) return 'O dia tem de estar entre 1 e 31.'; Object.assign(r, { descricao: norm(v.descricao), valor, dia, categoria: v.categoria, conta: v.pagar.startsWith('c:') ? v.pagar.slice(2) : '', cartao: v.pagar.startsWith('k:') ? v.pagar.slice(2) : '', fim: v.fim || '', cada: Number(v.cada) || 1, auto: v.auto === 'sim' && v.pagar.startsWith('c:') }); if (r.categoria !== (catOf(r.tipo, r.categoria) || {}).nome) r.subcategoria = ''; save(); autoCartao(); render(); toast('Fixa atualizada'); } },
         { label: 'Terminar', confirm: true, fn: () => { r.fim = addMes(ymOf(hoje()), -1) < r.inicio ? r.inicio : ymOf(hoje()); save(); render(); toast('Esta fixa termina este mês'); } },
         { label: 'Apagar', kind: 'danger', confirm: true, fn: () => { cfg.recorrentes = cfg.recorrentes.filter((x) => x !== r); Object.keys(S.movimentos).forEach((id) => { const m = S.movimentos[id]; if (m.recorrenteId === r.id && (m.skip || !m.pago)) delete S.movimentos[id]; else if (m.recorrenteId === r.id) delete m.recorrenteId; }); save(); render(); toast('Fixa apagada. Os pagamentos já feitos ficam no histórico.'); } }]
     });
@@ -1333,6 +1351,7 @@ button.rowi:hover { background: var(--panel-2); }
   $('sw-pago').addEventListener('click', () => { ent.pago = !ent.pago; drawSheet(); });
   $('r-no').addEventListener('click', () => { ent.rep = 'no'; drawSheet(); });
   $('r-fixa').addEventListener('click', () => { ent.rep = 'fixa'; drawSheet(); });
+  $('sw-auto').addEventListener('click', () => { ent.auto = !ent.auto; drawSheet(); });
   $('r-parc').addEventListener('click', () => { ent.rep = 'parc'; drawSheet(); });
   $('w-cada').addEventListener('click', (e) => { const b = e.target.closest('button[data-cada]'); if (!b) return; ent.cada = Number(b.dataset.cada); drawSheet(); });
   $('n-menos').addEventListener('click', () => { ent.n = Math.max(2, ent.n - 1); drawSheet(); });
@@ -1392,6 +1411,7 @@ button.rowi:hover { background: var(--panel-2); }
     $('r-no').setAttribute('aria-pressed', ent.rep === 'no'); $('r-fixa').setAttribute('aria-pressed', ent.rep === 'fixa'); $('r-parc').setAttribute('aria-pressed', ent.rep === 'parc');
     $('r-parc').hidden = t !== 'despesa'; if (t !== 'despesa' && ent.rep === 'parc') ent.rep = 'no';
     $('w-n').hidden = ent.rep !== 'parc'; $('n-val').textContent = ent.n;
+    $('w-auto').hidden = ent.rep !== 'fixa' || !!(t === 'despesa' && ent.cartao); $('sw-auto').setAttribute('aria-checked', !!ent.auto); $('auto-lbl').textContent = t === 'receita' ? 'Recebimento automático (fica recebida sozinha no dia)' : 'Débito automático (fica paga sozinha no dia)';
     $('w-cada').hidden = ent.rep !== 'fixa'; $('w-cada').querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', Number(b.dataset.cada) === (ent.cada || 1)));
     $('ok').textContent = edit ? 'Guardar' : tr ? 'Transferir' : t === 'despesa' ? 'Guardar despesa' : 'Guardar receita';
     drawAmount();
@@ -1426,7 +1446,7 @@ button.rowi:hover { background: var(--panel-2); }
         putMov(uid(), Object.assign({}, base, { valor: v, data: d, descricao: (base.descricao || base.subcategoria || base.categoria) + ' (' + (i + 1) + '/' + n + ')', pago: ent.cartao ? true : (i === 0 ? pago : false), parcela: { g, i: i + 1, n }, criado: agora }));
       }
     } else if (ent.rep === 'fixa') {
-      const r = Object.assign({ id: uid(), valor, dia: Number(ent.data.slice(8, 10)), inicio: ymOf(ent.data), fim: '', cada: ent.cada || 1 }, base);
+      const r = Object.assign({ id: uid(), valor, dia: Number(ent.data.slice(8, 10)), inicio: ymOf(ent.data), fim: '', cada: ent.cada || 1, auto: !!ent.auto && !ent.cartao && !!base.conta }, base);
       cfg.recorrentes.push(r);
       putMov(uid(), Object.assign({}, base, { valor, data: ent.data, pago, recorrenteId: r.id, recMes: r.inicio, criado: agora }));
       autoCartao();
@@ -1750,6 +1770,21 @@ button.rowi:hover { background: var(--panel-2); }
   iniciarFirebase();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
   window.__app = { S: () => S, virtuais, aPagar, faturas, saldoConta, sync: () => ({ sy, SM, pend: [...pend] }) };
+})();
+</script>
+<script>
+(function () {
+  var KEY = 'gestorDespesas.tema';
+  function aplica(t) {
+    document.documentElement.setAttribute('data-tema', t);
+    var esc = t === 'escuro' || (t === 'auto' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+    var mc = document.querySelector('meta[name="theme-color"]'); if (mc) mc.setAttribute('content', esc ? '#0f1411' : '#0e7c66');
+    document.querySelectorAll('#m-tema [data-tema]').forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-tema') === t); });
+  }
+  var atual = document.documentElement.getAttribute('data-tema') || 'escuro';
+  aplica(atual);
+  document.querySelectorAll('#m-tema [data-tema]').forEach(function (b) { b.addEventListener('click', function () { atual = b.getAttribute('data-tema'); try { localStorage.setItem(KEY, atual); } catch (e) {} aplica(atual); }); });
+  if (window.matchMedia) { var mq = matchMedia('(prefers-color-scheme: dark)'); var f = function () { if (atual === 'auto') aplica('auto'); }; if (mq.addEventListener) mq.addEventListener('change', f); else if (mq.addListener) mq.addListener(f); }
 })();
 </script>
 </body>
