@@ -147,6 +147,7 @@ button.rowi:hover { background: var(--panel-2); }
 .pend { opacity: .72; }
 .tag { font-size: .66rem; border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; margin-left: 6px; color: var(--muted); font-weight: 700; vertical-align: 1px; }
 .tag.late { border-color: var(--bad); color: var(--bad); }
+.tag.ok { border-color: var(--in); color: var(--in); }
 .tag.soon { border-color: var(--warn); color: var(--warn); }
 .pay { border: 1px solid var(--accent); color: var(--accent); background: transparent; border-radius: 8px; padding: 4px 10px; font-weight: 700; font-size: .8rem; }
 
@@ -372,6 +373,9 @@ button.rowi:hover { background: var(--panel-2); }
     </div>
     <div class="seg full" role="group" aria-label="Filtrar">
       <button id="f-all" aria-pressed="true">Tudo</button><button id="f-out" aria-pressed="false">Despesas</button><button id="f-in" aria-pressed="false">Receitas</button><button id="f-tr" aria-pressed="false">Transf.</button>
+    </div>
+    <div class="seg full" role="group" aria-label="Estado">
+      <button id="e-all" aria-pressed="true">Todos</button><button id="e-pago" aria-pressed="false">✓ Pagos</button><button id="e-pend" aria-pressed="false">Por pagar</button>
     </div>
     <div class="muted small num" id="mov-tot"></div>
     <div id="days"></div>
@@ -740,6 +744,7 @@ button.rowi:hover { background: var(--panel-2); }
     const d = descLinha(m);
     const t1 = el('div', { class: 't1' }, [document.createTextNode(d.t1)]);
     if (isPend(m)) { const dd = diasAte(m.data); t1.append(el('span', { class: 'tag' + (dd < 0 ? ' late' : dd <= 5 ? ' soon' : ''), text: dd < 0 ? 'em atraso' : (m.tipo === 'receita' ? 'por receber' : 'por pagar') })); }
+    else if (m.tipo === 'despesa' || m.tipo === 'receita') t1.append(el('span', { class: 'tag ok', text: m.tipo === 'receita' ? '✓ recebido' : '✓ pago' }));
     let cls = 'v out', sign = '−';
     if (m.tipo === 'receita') { cls = 'v in'; sign = '+'; }
     else if (m.tipo === 'transferencia' || m.tipo === 'objetivo' || m.tipo === 'pagamento') { cls = 'v tr'; sign = ''; }
@@ -922,12 +927,16 @@ button.rowi:hover { background: var(--panel-2); }
   const FIL = { 'f-all': 'todos', 'f-out': 'despesa', 'f-in': 'receita', 'f-tr': 'transferencia' };
   Object.keys(FIL).forEach((id) => $(id).addEventListener('click', () => { filtro = FIL[id]; Object.keys(FIL).forEach((k) => $(k).setAttribute('aria-pressed', k === id)); renderMov(); }));
   $('procura').addEventListener('input', () => renderMov());
+  let estado = 'todos';
+  const EST = { 'e-all': 'todos', 'e-pago': 'pago', 'e-pend': 'pend' };
+  Object.keys(EST).forEach((id) => $(id).addEventListener('click', () => { estado = EST[id]; Object.keys(EST).forEach((k) => $(k).setAttribute('aria-pressed', k === id)); renderMov(); }));
   $('mov-st-saldo').addEventListener('click', () => go('s-ini', { jump: 'ini-contas-card' }));
   function renderMov() {
     const box = $('days'); box.textContent = '';
     const q = norm($('procura').value).toLocaleLowerCase('pt');
     let list = itensMes(mes).filter((m) => filtro === 'todos' || m.tipo === filtro || (filtro === 'transferencia' && (m.tipo === 'pagamento' || m.tipo === 'objetivo')));
     if (q) list = list.filter((m) => [m.descricao, m.categoria, m.subcategoria, m.conta, m.cartao, m.destino].join(' ').toLocaleLowerCase('pt').includes(q));
+    if (estado === 'pago') list = list.filter((m) => !isPend(m)); else if (estado === 'pend') list = list.filter((m) => isPend(m));
     list.sort((a, b) => String(b.data).localeCompare(String(a.data)) || String(b.criado || '').localeCompare(String(a.criado || '')));
     const ef = list.filter((m) => !isPend(m));
     { const its = itensMes(mes); const bal = r2(soma(efetivas(its, 'receita')) - soma(efetivas(its, 'despesa'))); const sd = saldoTotal();
