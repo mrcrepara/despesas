@@ -211,6 +211,11 @@ button.rowi:hover { background: var(--panel-2); }
 .keyrow i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
 
 .jump { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+/* no computador (rato), as filas que deslizam passam a ocupar várias linhas, para se ver tudo */
+@media (hover: hover) and (pointer: fine) {
+  .jump { flex-wrap: wrap; overflow-x: visible; }
+  .hscroll { flex-wrap: wrap; overflow-x: visible; margin: 0; padding: 2px 0 6px; }
+}
 .jump button { flex: 0 0 auto; border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 6px 12px; font-weight: 600; font-size: .84rem; }
 .cat { border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .cat-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
