@@ -210,6 +210,15 @@ button.rowi:hover { background: var(--panel-2); }
 .keyrow { display: flex; gap: 12px; font-size: .78rem; color: var(--muted); }
 .keyrow i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
 
+.livre-big { font-family: var(--f-display); font-size: 2rem; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.livre-rows { display: flex; flex-direction: column; gap: 2px; }
+.livre-rows .lr { display: flex; justify-content: space-between; gap: 10px; font-size: .9rem; padding: 3px 0; }
+.livre-rows .lr .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+.livre-rows .lr.tot { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 7px; font-weight: 700; }
+.livre-fx { background: var(--panel-2); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: .86rem; }
+.livre-fx .r { display: flex; justify-content: space-between; gap: 8px; }
+.livre-det summary { cursor: pointer; list-style: none; padding: 2px 0; }
+.livre-det summary::-webkit-details-marker { display: none; }
 .jump { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
 /* no computador (rato), as filas que deslizam passam a ocupar várias linhas, para se ver tudo */
 @media (hover: hover) and (pointer: fine) {
@@ -334,6 +343,13 @@ button.rowi:hover { background: var(--panel-2); }
         <button class="hero-b" id="ini-bout" type="button"><span class="circ out" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg></span><span class="hb-t"><small>Despesas</small><b class="mny out" id="ini-out">—</b></span></button>
       </div>
       <div class="foot mny" id="ini-prev"></div>
+    </div>
+    <div class="card" id="ini-livre">
+      <div class="card-head"><h2 id="livre-tit">Para gastar até ao fim do mês</h2><span class="muted small" id="livre-dias"></span></div>
+      <div class="livre-big mny" id="livre-v">—</div>
+      <div class="livre-rows mnys" id="livre-rows"></div>
+      <div id="livre-fixas"></div>
+      <details class="livre-det" id="livre-det"><summary class="link" id="livre-sum">Ver o que ainda vai sair</summary><div class="mnys" id="livre-lista"></div></details>
     </div>
     <div class="sec">
       <div class="sec-h"><h2>Pendências e alertas</h2><button class="link" data-go="s-pla" data-pla="pagar">Ver tudo</button></div>
@@ -692,6 +708,56 @@ button.rowi:hover { background: var(--panel-2); }
   function guardadoObj(o) { return r2(allMovs().filter((m) => m.tipo === 'objetivo' && m.objetivo === o.id).reduce((s, m) => s + Number(m.valor), 0)); }
 
   // lista "a pagar": pendentes reais + fixas virtuais (até ao próximo mês) + faturas por pagar
+  // quanto fica para gastar até ao fim do mês: saldo atual menos tudo o que ainda vai sair este mês
+  function renderLivre() {
+    const h = hoje(), hm = ymOf(h), fim = dataEm(hm, 31);
+    const card = $('ini-livre');
+    if (!cfg.contas.length) { card.hidden = true; return; }
+    card.hidden = false;
+    const sai = [], entra = [];
+    allMovs().forEach((m) => { if (!m.skip && isPend(m) && m.data <= fim) (m.tipo === 'receita' ? entra : sai).push({ nome: descLinha(m).t1, data: m.data, valor: Number(m.valor) || 0, fixa: !!m.recorrenteId, auto: false }); });
+    const first = cfg.recorrentes.reduce((a, r) => (!a || r.inicio < a ? r.inicio : a), null);
+    if (first) for (let ym = first; ym <= hm; ym = addMes(ym, 1)) virtuais(ym).forEach((m) => { if (m.cartao) return; const r = cfg.recorrentes.find((x) => x.id === m.recorrenteId); (m.tipo === 'receita' ? entra : sai).push({ nome: descLinha(m).t1, data: m.data, valor: Number(m.valor) || 0, fixa: true, auto: !!(r && r.auto) }); });
+    cfg.cartoes.forEach((c) => faturas(c).forEach((f) => { if (f.falta > 0 && f.venc <= fim) sai.push({ nome: 'Fatura ' + c.nome, data: f.venc, valor: f.falta, fatura: true }); }));
+    sai.sort((a, b) => a.data.localeCompare(b.data));
+    const saldo = saldoTotal(), tSai = r2(sai.reduce((x, i) => x + i.valor, 0)), tEnt = r2(entra.reduce((x, i) => x + i.valor, 0));
+    const livre = r2(saldo - tSai);
+    const diasF = Number(diasMes(hm)) - Number(h.slice(8, 10)) + 1;
+    $('livre-tit').textContent = 'Para gastar até ao fim de ' + mesFmt.format(mesDate(hm)).split(' ')[0];
+    $('livre-dias').textContent = diasF === 1 ? 'último dia' : 'faltam ' + diasF + ' dias';
+    $('livre-v').textContent = eur.format(livre); $('livre-v').className = 'livre-big mny' + (livre < 0 ? ' neg' : '');
+    const rows = $('livre-rows'); rows.textContent = '';
+    const lr = (t, v, cls) => el('div', { class: 'lr' + (cls ? ' ' + cls : '') }, [el('span', { text: t }), el('span', { class: 'v', text: v })]);
+    rows.append(lr('Saldo nas contas agora', eur.format(saldo)));
+    rows.append(lr('Ainda vai sair este mês' + (sai.length ? ' (' + sai.length + ')' : ''), '−' + eur.format(tSai)));
+    rows.append(lr('Fica para gastar', eur.format(livre), 'tot'));
+    if (tEnt) rows.append(lr('Ainda vai entrar' + ' (' + entra.length + ')', '+' + eur.format(tEnt)));
+    if (tEnt) rows.append(lr('Contando com o que vai entrar', eur.format(r2(livre + tEnt))));
+    if (livre > 0 && diasF > 0) rows.append(el('div', { class: 'muted small', text: 'Dá cerca de ' + eur.format(r2(livre / diasF)) + ' por dia até ao fim do mês.' }));
+    // despesas fixas do mês: total, já pagas e as que faltam
+    const fx = $('livre-fixas'); fx.textContent = '';
+    let fTot = 0, fPago = 0;
+    cfg.recorrentes.forEach((r) => {
+      if (r.tipo !== 'despesa' || !recAtiva(r, hm)) return;
+      const real = allMovs().find((m) => m.recorrenteId === r.id && m.recMes === hm);
+      if (real && real.skip) return;
+      const v = real ? Number(real.valor) || 0 : Number(r.valor) || 0;
+      fTot += v; if (real && !isPend(real)) fPago += v;
+    });
+    fTot = r2(fTot); fPago = r2(fPago);
+    if (fTot > 0) {
+      const u = fPago / fTot;
+      fx.append(el('div', { class: 'livre-fx' }, [
+        el('div', { class: 'r' }, [el('b', { text: 'Despesas fixas do mês' }), el('b', { class: 'mny num', text: eur.format(fTot) })]),
+        el('div', { class: 'meter' }, [el('i', { style: 'width:' + (u * 100) + '%;background:var(--accent)' })]),
+        el('div', { class: 'r muted' }, [el('span', { class: 'mny', text: 'Já pagas ' + eur.format(fPago) }), el('span', { class: 'mny', text: 'Faltam ' + eur.format(r2(fTot - fPago)) })])
+      ]));
+    }
+    const ls = $('livre-lista'); ls.textContent = '';
+    $('livre-det').hidden = !sai.length;
+    $('livre-sum').textContent = 'Ver o que ainda vai sair (' + sai.length + ')';
+    sai.forEach((i) => { const dd = diasAte(i.data); ls.append(el('div', { class: 'rowi', style: 'grid-template-columns:minmax(0,1fr) auto' }, [el('div', { style: 'min-width:0' }, [el('div', { class: 't1', text: i.nome }), el('div', { class: 't2', text: (dd < 0 ? 'em atraso · ' : dd === 0 ? 'hoje · ' : '') + dataCurta.format(dDate(i.data)) + (i.fatura ? ' · fatura do cartão' : i.auto ? ' · débito automático' : i.fixa ? ' · fixa' : '') })]), el('span', { class: 'v', text: '−' + eur.format(i.valor) })])); });
+  }
   function aPagar() {
     const h = hoje(), lim = addMes(ymOf(h), 1);
     const out = [];
@@ -772,6 +838,7 @@ button.rowi:hover { background: var(--panel-2); }
     $('ini-prev').textContent = (pOut || pIn) ? 'Ainda este mês: ' + [pOut ? eur.format(pOut) + ' por pagar' : '', pIn ? eur.format(pIn) + ' por receber' : ''].filter(Boolean).join(' · ') : 'Saldo do mês: ' + (tin - tout >= 0 ? '+' : '') + eur.format(r2(tin - tout));
 
     renderAlertas();
+    renderLivre();
 
     const lc = $('ini-contas'); lc.textContent = '';
     if (!cfg.contas.length) lc.append(el('div', { class: 'muted small', text: 'Sem contas. Crie uma em Mais → Contas.' }));
