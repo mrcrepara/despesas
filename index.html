@@ -387,6 +387,8 @@ button.rowi:hover { background: var(--panel-2); }
       <button id="p-orc" aria-pressed="true">Orçamento</button><button id="p-pagar" aria-pressed="false">A pagar</button><button id="p-obj" aria-pressed="false">Objetivos</button>
     </div>
     <div id="pla-orc" class="screen">
+      <div class="seg full" role="group" aria-label="Período do orçamento" id="orc-vista"><button data-v="1" aria-pressed="true">Mês</button><button data-v="6" aria-pressed="false">Semestre</button><button data-v="12" aria-pressed="false">Ano</button></div>
+      <div class="muted small" id="orc-periodo" style="text-align:center;margin-top:-6px"></div>
       <div class="card">
         <div class="card-head"><h2>Planeamento total</h2><span class="muted num" id="orc-total"></span></div>
         <div class="stats2 in-card">
@@ -806,7 +808,7 @@ button.rowi:hover { background: var(--panel-2); }
     const semana = ap.filter((x) => !x.receita && x.kind === 'mov' && d(x) >= 0 && d(x) <= 7);
     const fats = ap.filter((x) => x.kind === 'fatura' && d(x) >= 0);
     const receber = ap.filter((x) => x.receita && d(x) <= 7);
-    const exc = orcLinhas(ymOf(hoje())).filter((r) => r.o && r.g > r.o);
+    const exc = orcExcedidos(ymOf(hoje()));
     const tot = (l) => eur.format(r2(l.reduce((a, x) => a + (Number(x.valor) || 0), 0)));
     const card = (ic, n, cls, txt, val, valCls, fn) => el('button', { class: 'acard', type: 'button', onclick: fn }, [el('span', { class: 'a-ic' }, [document.createTextNode(ic), n ? el('span', { class: 'badge' + (cls ? ' ' + cls : ''), text: String(n) }) : null]), el('small', { text: txt }), el('b', { class: valCls || '', text: val })]);
     const pagar = () => go('s-pla', { pla: 'pagar' });
@@ -817,13 +819,42 @@ button.rowi:hover { background: var(--panel-2); }
     if (exc.length) box.append(card('📊', exc.length, '', exc.length > 1 ? 'Categorias acima do orçamento' : exc[0].c.nome + ' acima do orçamento', eur.format(r2(exc.reduce((a, r) => a + r.g - r.o, 0))), 'late', () => go('s-pla', { pla: 'orc' })));
     if (!box.children.length) box.append(card('✅', 0, '', 'Tudo em dia. Nada por pagar esta semana.', 'Sem alertas', '', pagar));
   }
-  // linhas do orçamento de um mês (usado no Início e no Planeamento)
-  function orcLinhas(ym) {
-    const its = itensMes(ym);
+  // períodos do orçamento: 1 = mês, 6 = semestre, 12 = ano
+  const PER_TXT = { 1: 'mês', 6: 'semestre', 12: 'ano' };
+  const PER_ADJ = { 1: 'mensal', 6: 'semestral', 12: 'anual' };
+  const perOf = (c) => ([1, 6, 12].includes(Number(c && c.orcPer)) ? Number(c.orcPer) : 1);
+  function mesesPeriodo(ym, v) {
+    if (v === 1) return [ym];
+    const [y, m] = ym.split('-').map(Number);
+    const ini = v === 12 ? 1 : (m <= 6 ? 1 : 7);
+    const out = []; for (let i = 0; i < v; i++) out.push(y + '-' + pad(ini + i));
+    return out;
+  }
+  function nomePeriodo(ym, v) {
+    const y = ym.slice(0, 4), m = Number(ym.slice(5, 7));
+    if (v === 1) return cap(mesFmt.format(mesDate(ym)));
+    if (v === 12) return 'Ano de ' + y + ' (jan–dez)';
+    return (m <= 6 ? '1.º' : '2.º') + ' semestre de ' + y + (m <= 6 ? ' (jan–jun)' : ' (jul–dez)');
+  }
+  function fracPer(meses) { let tot = 0, passou = 0; meses.forEach((ym) => { const d = diasMes(ym); tot += d; passou += d * fracMes(ym); }); return tot ? passou / tot : 0; }
+  function diasRestPer(meses) { return meses.reduce((s, ym) => s + diasRestantes(ym), 0); }
+  // categorias acima do orçamento, cada uma comparada no seu próprio período
+  function orcExcedidos(ym) { const out = []; [1, 6, 12].forEach((v) => orcLinhas(ym, v).forEach((r) => { if (perOf(r.c) === v && r.o && r.g > r.o) out.push(r); })); return out; }
+  // linhas do orçamento de um mês, semestre ou ano (usado no Início e no Planeamento)
+  function orcLinhas(ym, v) {
+    v = v || 1;
+    const meses = mesesPeriodo(ym, v);
+    const its = [].concat(...meses.map((x) => itensMes(x)));
     const outs = efetivas(its, 'despesa'), pend = its.filter((m) => m.tipo === 'despesa' && isPend(m));
     const cats = cfg.despesa.slice();
     outs.concat(pend).forEach((m) => { if (!cats.some((c) => same(c.nome, m.categoria))) cats.push({ nome: m.categoria, orcamento: 0, subs: [] }); });
-    return cats.map((c) => ({ c, g: soma(outs.filter((m) => same(m.categoria, c.nome))), p: soma(pend.filter((m) => same(m.categoria, c.nome))), o: Number(c.orcamento) || 0 }));
+    const linhas = cats.map((c) => ({ c, g: soma(outs.filter((m) => same(m.categoria, c.nome))), p: soma(pend.filter((m) => same(m.categoria, c.nome))), o: r2((Number(c.orcamento) || 0) * meses.length / perOf(c)) }));
+    // categorias com orçamento de período maior (ex.: anual vista no mês) comparam-se no seu próprio período
+    return linhas.map((r) => {
+      if (!(Number(r.c.orcamento) > 0) || perOf(r.c) <= v) return r;
+      const big = orcLinhas(ym, perOf(r.c)).find((x) => x.c === r.c || same(x.c.nome, r.c.nome));
+      return { c: r.c, g: big.g, p: big.p, o: big.o, fora: perOf(r.c), gPer: r.g };
+    });
   }
   // fração do mês já passada (para a linha "HOJE")
   function fracMes(ym) { const h = hoje(), hm = ymOf(h); if (ym < hm) return 1; if (ym > hm) return 0; const [y, m] = ym.split('-').map(Number); const dias = new Date(y, m, 0).getDate(); return Number(h.slice(8, 10)) / dias; }
@@ -988,18 +1019,26 @@ button.rowi:hover { background: var(--panel-2); }
   $('p-obj').addEventListener('click', () => setPla('obj'));
   function renderPla() { setPla(plaTab, true); if (plaTab === 'orc') renderOrc(); else if (plaTab === 'pagar') renderPagar(); else renderObj(); }
 
+  let orcVista = 1;
+  try { orcVista = Number(localStorage.getItem(KEY + '.orcVista')) || 1; } catch (e) {}
+  document.querySelectorAll('#orc-vista [data-v]').forEach((b) => b.addEventListener('click', () => { orcVista = Number(b.dataset.v); try { localStorage.setItem(KEY + '.orcVista', String(orcVista)); } catch (e) {} renderOrc(); }));
   function renderOrc() {
     const box = $('buds'); box.textContent = '';
-    const fr = fracMes(mes);
-    const rows = orcLinhas(mes).sort((a, b) => (b.o ? b.g / b.o : 0) - (a.o ? a.g / a.o : 0) || b.g - a.g);
+    const v = orcVista, meses = mesesPeriodo(mes, v);
+    document.querySelectorAll('#orc-vista [data-v]').forEach((b) => b.setAttribute('aria-pressed', Number(b.dataset.v) === v));
+    $('orc-periodo').textContent = nomePeriodo(mes, v) + (v > 1 ? ' · use ‹ › em cima para mudar' : '');
+    const fr = fracPer(meses);
+    const rows = orcLinhas(mes, v).sort((a, b) => (b.o ? b.g / b.o : 0) - (a.o ? a.g / a.o : 0) || b.g - a.g);
     let totOrc = 0, totG = 0, totP = 0;
-    rows.forEach(({ c, g, p, o }) => {
-      totOrc += o; totG += g; totP += p;
+    rows.forEach(({ c, g, p, o, fora, gPer }) => {
+      if (!fora) { totOrc += o; totG += g; totP += p; }
       const u = o ? g / o : 0, over = o && g > o;
       const col = over ? 'var(--bad)' : colorOf('despesa', c.nome);
       const rest = o ? (over ? 'Excedeu ' + eur.format(r2(g - o)) : 'Restam ' + eur.format(r2(o - g))) : (g ? 'Sem orçamento' : '');
       let info = o ? eur.format(g) + ' de ' + eur0.format(o) : (g ? eur.format(g) + ' gastos' : 'Sem orçamento e sem gastos');
       if (p) info += ' · ' + eur.format(p) + ' por pagar';
+      if (fora) info += ' no ' + (fora === 12 ? 'ano' : 'semestre') + ' (orçamento ' + PER_ADJ[fora] + ', fora do total)';
+      else if (o && perOf(c) !== v) info += ' · orçamento ' + PER_ADJ[perOf(c)] + ' de ' + eur0.format(c.orcamento);
       const pm = el('div', { class: 'pmeter' }, [el('i', { style: 'width:' + (o ? Math.min(100, u * 100) : 0) + '%;background:' + col }), o ? el('em', { text: pct.format(u), style: u > .88 ? 'color:#fff;opacity:1' : '' }) : null]);
       if (o && fr > 0 && fr < 1) pm.append(el('span', { class: 'hoje', style: 'left:' + (fr * 100) + '%' }));
       const row = el('button', { class: 'bud', type: 'button', style: 'width:100%;text-align:left;background:transparent;border-left:0;border-right:0;border-bottom:0', onclick: () => { go('s-mov'); $('f-out').click(); $('procura').value = c.nome; renderMov(); } }, [icBox('despesa', c.nome), el('div', { style: 'display:flex;flex-direction:column;gap:3px;min-width:0' }, [el('div', { class: 'top' }, [el('span', { text: c.nome, style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }), el('span', { class: 'rest' + (over ? ' over' : ''), text: rest })]), pm]), el('div', { class: 'info' + (over ? ' over' : ''), text: info })]);
@@ -1007,7 +1046,7 @@ button.rowi:hover { background: var(--panel-2); }
     });
     if (!rows.length) box.append(el('div', { class: 'empty', text: 'Ainda sem categorias de despesa.' }));
     totG = r2(totG);
-    const u = totOrc ? totG / totOrc : 0, sobra = r2(totOrc - totG), dr = diasRestantes(mes);
+    const u = totOrc ? totG / totOrc : 0, sobra = r2(totOrc - totG), dr = diasRestPer(meses);
     $('orc-total').textContent = totOrc ? eur.format(totG) + ' / ' + eur0.format(totOrc) : '';
     $('orc-meter').style.width = Math.min(100, u * 100) + '%'; $('orc-meter').style.background = u > 1 ? 'var(--bad)' : u > fr + .05 && fr < 1 ? 'var(--warn)' : 'var(--accent)';
     $('orc-pct').textContent = totOrc ? pct.format(u) : ''; $('orc-pct').style.color = u > .88 ? '#fff' : ''; $('orc-pct').style.opacity = u > .88 ? '1' : '';
@@ -1015,7 +1054,7 @@ button.rowi:hover { background: var(--panel-2); }
     $('orc-l1').textContent = sobra < 0 ? 'Excedeu' : 'Disponível'; $('orc-ic1').textContent = sobra < 0 ? '⚠️' : '💶';
     $('orc-v1').textContent = totOrc ? eur.format(Math.abs(sobra)) : '—'; $('orc-v1').className = sobra < 0 ? 'neg' : 'pos';
     $('orc-v2').textContent = totOrc && dr ? eur.format(Math.max(0, r2(sobra / dr))) : '—';
-    $('orc-info').textContent = totOrc ? (u > fr + .05 && fr < 1 && sobra >= 0 ? 'Está a gastar mais depressa do que o mês está a passar. ' : '') + (totP ? 'Faltam pagar ' + eur.format(r2(totP)) + '. ' : '') + 'Toque numa categoria para ver os movimentos.' : 'Defina orçamentos em Mais → Categorias.';
+    $('orc-info').textContent = totOrc ? (u > fr + .05 && fr < 1 && sobra >= 0 ? 'Está a gastar mais depressa do que o ' + PER_TXT[v] + ' está a passar. ' : '') + (totP ? 'Faltam pagar ' + eur.format(r2(totP)) + '. ' : '') + 'Toque numa categoria para ver os movimentos.' : 'Defina orçamentos em Mais → Categorias.';
   }
 
   function renderPagar() {
@@ -1179,7 +1218,7 @@ button.rowi:hover { background: var(--panel-2); }
       { id: 'nome', label: 'Nome', value: c.nome },
       { id: 'icone', type: 'icon', label: 'Ícone', value: iconOf(t, c.nome) }
     ];
-    if (t === 'despesa') fields.push({ id: 'orc', type: 'money', label: 'Orçamento mensal (€)', value: c.orcamento ? vstr(c.orcamento) : '' });
+    if (t === 'despesa') { fields.push({ id: 'orc', type: 'money', label: 'Orçamento (€)', value: c.orcamento ? vstr(c.orcamento) : '' }); fields.push({ id: 'per', type: 'select', label: 'Este valor é', value: String(perOf(c)), options: [['1', 'Por mês'], ['6', 'Por semestre'], ['12', 'Por ano']], hint: 'Use semestral ou anual para gastos que não são todos os meses (seguros, IUC, férias, prendas de Natal).' }); }
     if (usados) fields.push({ id: 'dest', type: 'select', label: 'Se apagar, os ' + usados + ' movimentos passam para', value: '', options: [['', 'Ficam como estão']].concat(outras.map((x) => [x.nome, x.nome])) });
     dialog({
       title: 'Editar categoria',
@@ -1188,7 +1227,7 @@ button.rowi:hover { background: var(--panel-2); }
       actions: [
         { label: 'Guardar', kind: 'primary', fn: (v) => {
           const nome = norm(v.nome); if (!nome) return 'Escreva um nome.';
-          if (t === 'despesa') { const o = parseValor(v.orc || '0'); if (isNaN(o) || o < 0) return 'Orçamento inválido.'; c.orcamento = o; }
+          if (t === 'despesa') { const o = parseValor(v.orc || '0'); if (isNaN(o) || o < 0) return 'Orçamento inválido.'; c.orcamento = o; c.orcPer = Number(v.per) || 1; }
           if (v.icone) c.icone = v.icone;
           if (!same(nome, c.nome) || nome !== c.nome) {
             const outra = catOf(t, nome);
@@ -1268,7 +1307,7 @@ button.rowi:hover { background: var(--panel-2); }
       const usados = allMovs().filter((m) => m.tipo === cTipo && same(m.categoria, c.nome)).length;
       const ib = el('button', { class: 'ic', style: 'background:' + colorOf(cTipo, c.nome) + '26', text: iconOf(cTipo, c.nome), 'aria-label': 'Mudar ícone de ' + c.nome, onclick: () => { iconOpen = iconOpen === ci ? null : ci; renderCats(); } });
       const top = el('div', { class: 'cat-top' }, [ib, el('span', { class: 'nm', text: c.nome, role: 'button', tabindex: '0', onclick: () => editarCat(cTipo, c) })]);
-      if (cTipo === 'despesa') { const inp = el('input', { id: 'orc-' + ci, inputmode: 'decimal', value: c.orcamento ? vstr(c.orcamento) : '', placeholder: '0', 'aria-label': 'Orçamento de ' + c.nome }); inp.addEventListener('change', () => { const v = parseValor(inp.value || '0'); if (!isNaN(v) && v >= 0) { c.orcamento = v; save(); } }); top.append(el('label', {}, [document.createTextNode('€/mês'), inp])); }
+      if (cTipo === 'despesa') { const inp = el('input', { id: 'orc-' + ci, inputmode: 'decimal', value: c.orcamento ? vstr(c.orcamento) : '', placeholder: '0', 'aria-label': 'Orçamento de ' + c.nome }); inp.addEventListener('change', () => { const v = parseValor(inp.value || '0'); if (!isNaN(v) && v >= 0) { c.orcamento = v; save(); } }); top.append(el('label', {}, [document.createTextNode('€/' + PER_TXT[perOf(c)]), inp])); }
       top.append(el('button', { class: 'icon-btn edit', text: '✏️ Editar', 'aria-label': 'Editar ou apagar ' + c.nome, onclick: () => editarCat(cTipo, c) }));
       const card = el('div', { class: 'cat' }, [top]);
       if (iconOpen === ci) card.append(iconPicker(iconOf(cTipo, c.nome), (e) => { c.icone = e; iconOpen = null; save(); renderCats(); }));
@@ -1526,7 +1565,12 @@ button.rowi:hover { background: var(--panel-2); }
   $('bk-nao').addEventListener('click', () => { pendente = null; $('bk-confirm').hidden = true; });
 
   let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { if (screen === 's-ini') renderTrend(); }, 120); });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) { autoCartao(); render(); } });
+  // quando a app volta a abrir noutro mês (ficou aberta em segundo plano), passa para o mês novo
+  let mesHoje = ymOf(hoje());
+  function viraMes() { const agora = ymOf(hoje()); if (agora !== mesHoje) { if (mes === mesHoje) mes = agora; mesHoje = agora; } }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { viraMes(); autoCartao(); render(); } });
+  window.addEventListener('focus', () => { const antes = mes; viraMes(); if (mes !== antes) { autoCartao(); render(); } });
+  setInterval(() => { if (!document.hidden) { const antes = mes; viraMes(); if (mes !== antes) { autoCartao(); render(); } } }, 60000);
 
 
   // ================= sincronização (Firebase) =================
